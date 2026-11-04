@@ -87,7 +87,7 @@ jobs:
       # numpy<2: stable-audio-tools pins PyWavelets 1.4.1, which is built against numpy 1.x.
       # [train]: the inference path still imports pytorch_lightning (models/lora/callbacks.py).
       - run: |
-          pip install torch==2.7.1 torchaudio==2.7.1 --index-url https://download.pytorch.org/whl/cpu
+          pip install torch==2.7.1 torchaudio==2.7.1 torchvision==0.22.1 --index-url https://download.pytorch.org/whl/cpu
           pip install "stable-audio-tools[train]" "numpy<2"
           python -c "from stable_audio_tools.models.diffusion import ConditionedDiffusionModelWrapper"
       - name: Render S0001 music bed
