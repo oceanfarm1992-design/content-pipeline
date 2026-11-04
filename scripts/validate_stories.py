@@ -2,8 +2,26 @@
 import sys
 from collections import Counter
 
-from common import (MAX_DIALOGUE_WORDS, REGISTERS, SCENE_SECONDS, SCENES_PER_EPISODE, STATUSES,
-                    TRANSITIONS, read_csv, story_id)
+from common import (MAX_DIALOGUE_WORDS, REGISTERS, ROLES, SCENE_SECONDS, SCENES_PER_EPISODE, STATUSES,
+                    TRANSITIONS, VOICES, read_csv, story_id)
+
+
+def check_character(c: dict) -> list[str]:
+    """Errors for one characters.csv row."""
+    cid = c["character_id"]
+    errors = []
+    for col in ("name", "species", "description", "never_change"):
+        if not str(c[col]).strip():
+            errors.append(f"{cid}: empty {col}")
+    if c["role"] not in ROLES:
+        errors.append(f"{cid}: bad role '{c['role']}'")
+    if c["voice_id"] not in VOICES:
+        errors.append(f"{cid}: unknown Kokoro voice '{c['voice_id']}'")
+    if not (len(c["first_episode"]) == 5 and c["first_episode"].startswith("S") and c["first_episode"][1:].isdigit()):
+        errors.append(f"{cid}: bad first_episode '{c['first_episode']}'")
+    if c["reference_sheet"] != f"series/refs/{cid}.png":
+        errors.append(f"{cid}: reference_sheet must be series/refs/{cid}.png")
+    return errors
 
 
 def check_episode(s: dict, scenes: list[dict], chars: set[str]) -> list[str]:
@@ -47,7 +65,14 @@ def check_episode(s: dict, scenes: list[dict], chars: set[str]) -> list[str]:
 
 def validate() -> tuple[list[str], list[str]]:
     errors, warnings = [], []
-    chars = {c["character_id"] for c in read_csv("characters.csv")}
+    cast = read_csv("characters.csv")
+    chars = {c["character_id"] for c in cast}
+    debut = {c["character_id"]: c["first_episode"] for c in cast}
+    for cid, n in Counter(c["character_id"] for c in cast).items():
+        if n > 1:
+            errors.append(f"{cid}: duplicate character_id")
+    for c in cast:
+        errors += check_character(c)
     stories = read_csv("stories.csv")
     callbacks = read_csv("callbacks.csv")
 
@@ -64,6 +89,9 @@ def validate() -> tuple[list[str], list[str]]:
             errors.append(f"{sid}: scenes exist but story is missing")
     for s in stories:
         errors += check_episode(s, by_story.get(s["story_id"], []), chars)
+        early = [c for c in s["characters_used"].split(";") if debut.get(c, "") > s["story_id"]]
+        if early:
+            errors.append(f"{s['story_id']}: uses {';'.join(early)} before their first_episode")
 
     for cb in callbacks:
         s_ep, p_ep = cb["setup_episode"], cb["payoff_episode"]

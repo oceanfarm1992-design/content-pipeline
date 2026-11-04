@@ -9,6 +9,20 @@ STORY_FIELDS = ["story_id", "episode", "title", "status", "emotional_register", 
 SCENE_FIELDS = ["story_id", "scene_id", "duration_s", "characters", "action", "camera",
                 "speaker", "dialogue", "sfx", "transition"]
 CALLBACK_FIELDS = ["setup_episode", "setup_moment", "payoff_episode", "payoff_moment"]
+CHARACTER_FIELDS = ["character_id", "name", "species", "role", "first_episode", "description", "traits",
+                    "backstory", "wound", "fear", "arc", "voice_id", "never_change", "negative",
+                    "reference_sheet"]
+
+# main: in every season. recurring: introduced by a story, may return. guest: one episode.
+ROLES = {"main", "recurring", "guest"}
+MAX_NEW_CHARACTERS = 2
+# Kokoro voices the writer may cast from (a = American, b = British; f = female, m = male).
+VOICES = {
+    "af_alloy", "af_aoede", "af_bella", "af_heart", "af_jessica", "af_kore", "af_nicole", "af_nova",
+    "af_river", "af_sarah", "af_sky", "am_adam", "am_echo", "am_eric", "am_fenrir", "am_liam",
+    "am_michael", "am_onyx", "am_puck", "bf_alice", "bf_emma", "bf_isabella", "bf_lily",
+    "bm_daniel", "bm_fable", "bm_george", "bm_lewis",
+}
 
 STATUSES = {"pending", "approved", "rendering", "done", "failed"}
 REGISTERS = {
@@ -27,6 +41,10 @@ TRANSITIONS = {"cut", "fade", "dissolve", "match_cut"}
 
 def story_id(episode: int) -> str:
     return f"S{episode:04d}"
+
+
+def character_id(n: int) -> str:
+    return f"C{n:03d}"
 
 
 def read_csv(name: str) -> list[dict]:
