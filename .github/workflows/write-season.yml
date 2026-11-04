@@ -1,0 +1,88 @@
+name: Write Season
+# Once a month, write the next 30-episode season (showrunner -> casting -> screenwriter -> film director)
+# on a season-<n> branch and open a pull request. Merging the pull request approves the season.
+# Runs on the 25th so there are a few days to review before the month starts.
+on:
+  schedule:
+    - cron: '0 2 25 * *'
+  workflow_dispatch:
+
+jobs:
+  write:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements.txt
+
+      - name: Pick the season branch
+        id: season
+        run: |
+          python - <<'EOF' >> "$GITHUB_OUTPUT"
+          import sys; sys.path.insert(0, "scripts")
+          from common import read_csv, season_for
+          stories = read_csv("stories.csv")
+          nxt = max((int(s["episode"]) for s in stories), default=0) + 1
+          season, _, _ = season_for(nxt, read_csv("seasons_plan.csv"))
+          print(f"number={season['season']}")
+          print(f"title={season['title']}")
+          EOF
+      # Continue an unmerged branch from an earlier (partial) run instead of starting over.
+      - name: Check out season-${{ steps.season.outputs.number }}
+        run: |
+          b="season-${{ steps.season.outputs.number }}"
+          if git ls-remote --exit-code --heads origin "$b" > /dev/null; then
+            git checkout -B "$b" "origin/$b"
+          else
+            git checkout -b "$b"
+          fi
+
+      - name: Write the season
+        id: write
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          set -o pipefail
+          if python scripts/write_season.py | tee write.log; then echo "complete=true" >> "$GITHUB_OUTPUT"
+          else echo "complete=false" >> "$GITHUB_OUTPUT"; fi
+
+      - name: Validate
+        run: python scripts/validate_stories.py
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add series/
+          git diff --cached --quiet || git commit -m "Season ${{ steps.season.outputs.number }}: ${{ steps.season.outputs.title }}"
+          git push -u origin HEAD
+
+      - name: Open pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          b="season-${{ steps.season.outputs.number }}"
+          if [ "${{ steps.write.outputs.complete }}" = "true" ]; then state="Complete."; else state="**Incomplete** — rerun this workflow to continue."; fi
+          {
+            echo "Season ${{ steps.season.outputs.number }}: ${{ steps.season.outputs.title }}. $state"
+            echo
+            echo "Merging this pull request approves every episode in it for rendering."
+            echo "Edit or delete rows in the CSVs on this branch before merging if anything needs changing."
+            echo
+            echo '```'; grep -E "^(Season|Showrunner|Casting|Writer|Director|Stopped)" write.log || true; echo '```'
+          } > body.md
+          if gh pr view "$b" > /dev/null 2>&1; then
+            gh pr edit "$b" --body-file body.md
+          elif ! gh pr create --head "$b" --base main --title "Season ${{ steps.season.outputs.number }}: ${{ steps.season.outputs.title }}" --body-file body.md; then
+            echo "::warning::Actions can't open pull requests in this repo. Open it here: ${{ github.server_url }}/${{ github.repository }}/compare/main...$b"
+          fi
+          [ "${{ steps.write.outputs.complete }}" = "true" ]

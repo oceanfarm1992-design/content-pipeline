@@ -13,6 +13,14 @@ CHARACTER_FIELDS = ["character_id", "name", "species", "role", "first_episode", 
                     "backstory", "wound", "fear", "arc", "voice_id", "never_change", "negative",
                     "reference_sheet"]
 
+CHAPTER_FIELDS = ["season", "chapter", "title", "first_episode", "last_episode", "summary"]
+SHOT_FIELDS = ["story_id", "scene_id", "shot_size", "angle", "movement", "lighting", "image_prompt", "motion_prompt"]
+SHOT_SIZES = {"extreme_wide", "wide", "medium", "medium_close", "close_up", "extreme_close_up",
+              "over_the_shoulder", "insert"}
+# Camera moves the renderer can do: on a still (pan/zoom) or as a Wan motion prompt.
+MOVEMENTS = {"static", "slow_push_in", "slow_pull_out", "pan_left", "pan_right", "tilt_up", "tilt_down",
+             "tracking", "handheld"}
+
 # main: in every season. recurring: introduced by a story, may return. guest: one episode.
 ROLES = {"main", "recurring", "guest"}
 MAX_NEW_CHARACTERS = 2

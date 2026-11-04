@@ -1,7 +1,6 @@
 name: Generate Stories
+# Manual top-up only: the monthly Write Season workflow writes each season.
 on:
-  schedule:
-    - cron: '0 1 * * *'
   workflow_dispatch:
 
 jobs:

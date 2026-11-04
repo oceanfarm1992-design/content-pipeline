@@ -2,8 +2,8 @@
 import sys
 from collections import Counter
 
-from common import (MAX_DIALOGUE_WORDS, REGISTERS, ROLES, SCENE_SECONDS, SCENES_PER_EPISODE, STATUSES,
-                    TRANSITIONS, VOICES, read_csv, story_id)
+from common import (MAX_DIALOGUE_WORDS, MOVEMENTS, REGISTERS, ROLES, SCENE_SECONDS, SCENES_PER_EPISODE,
+                    SHOT_SIZES, STATUSES, TRANSITIONS, VOICES, read_csv, story_id)
 
 
 def check_character(c: dict) -> list[str]:
@@ -92,6 +92,34 @@ def validate() -> tuple[list[str], list[str]]:
         early = [c for c in s["characters_used"].split(";") if debut.get(c, "") > s["story_id"]]
         if early:
             errors.append(f"{s['story_id']}: uses {';'.join(early)} before their first_episode")
+
+    shots_by_story: dict[str, list[dict]] = {}
+    for sh in read_csv("shots.csv"):
+        shots_by_story.setdefault(sh["story_id"], []).append(sh)
+    for sid, shots in shots_by_story.items():
+        if sid not in ids:
+            errors.append(f"{sid}: shots exist but story is missing")
+            continue
+        if sorted(s["scene_id"] for s in shots) != sorted(s["scene_id"] for s in by_story.get(sid, [])):
+            errors.append(f"{sid}: shot list doesn't match the scenes one-to-one")
+        for sh in shots:
+            tag = f"{sid} shot {sh['scene_id']}"
+            if sh["shot_size"] not in SHOT_SIZES:
+                errors.append(f"{tag}: bad shot_size '{sh['shot_size']}'")
+            if sh["movement"] not in MOVEMENTS:
+                errors.append(f"{tag}: bad movement '{sh['movement']}'")
+            if not sh["image_prompt"].strip():
+                errors.append(f"{tag}: empty image_prompt")
+
+    seen: dict[str, str] = {}
+    for ch in read_csv("chapters.csv"):
+        tag = f"season {ch['season']} chapter {ch['chapter']}"
+        if not ch["first_episode"] <= ch["last_episode"]:
+            errors.append(f"{tag}: first_episode after last_episode")
+        for n in range(int(ch["first_episode"][1:]), int(ch["last_episode"][1:]) + 1):
+            if story_id(n) in seen:
+                errors.append(f"{tag}: {story_id(n)} is already in {seen[story_id(n)]}")
+            seen[story_id(n)] = tag
 
     for cb in callbacks:
         s_ep, p_ep = cb["setup_episode"], cb["payoff_episode"]

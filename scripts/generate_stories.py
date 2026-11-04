@@ -17,7 +17,7 @@ from common import (CALLBACK_FIELDS, CHARACTER_FIELDS, MAX_NEW_CHARACTERS, REGIS
                     season_for, story_id)
 from validate_stories import check_character, check_episode
 
-MODEL = "gpt-4o-mini"
+MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
 MAX_ATTEMPTS = 3
 NEW_CHARACTER_KEYS = ["character_id", "name", "species", "role", "description", "traits", "backstory",
                       "wound", "fear", "arc", "voice_id", "never_change", "negative"]
@@ -53,13 +53,14 @@ Return ONLY valid JSON with exactly these keys:
 "stories" has exactly one entry. "callbacks" lists setups planted in THIS episode (payoff_episode is an integer episode number greater than this one); use [] if none. "new_characters" is [] if nobody new appears."""
 
 
-def available_cast(cast: list[dict]) -> list[dict]:
-    """Characters a new episode may use: everyone except one-off guests."""
-    return [c for c in cast if c["role"] != "guest"]
+def available_cast(cast: list[dict], sid: str) -> list[dict]:
+    """Characters episode `sid` may use: debuted by then, and guests only in their own episode."""
+    return [c for c in cast if c["first_episode"] <= sid and (c["role"] != "guest" or c["first_episode"] == sid)]
 
 
 def build_user_prompt(episode: int, stories: list[dict], callbacks: list[dict], seasons: list[dict],
-                      cast: list[dict]) -> str:
+                      cast: list[dict], outline: str = "", allow_new: bool = True) -> str:
+    sid = story_id(episode)
     season, n, finale = season_for(episode, seasons)
     lines = [
         f"Write episode {episode} (episode {n} of {season['episode_count']} in Season {season['season']}: {season['title']}).",
@@ -68,12 +69,17 @@ def build_user_prompt(episode: int, stories: list[dict], callbacks: list[dict], 
     ]
     if finale:
         lines.append(f"This is the SEASON FINALE. It must end on this cliffhanger: {season['finale_hook']}")
-    lines.append("Cast so far:")
+    if outline:
+        lines.append(f"SHOWRUNNER OUTLINE (follow it):\n{outline}")
+    lines.append("Cast available in this episode:")
     lines += [f"- {c['character_id']} {c['name']} ({c['species']}, {c['role']}, voice {c['voice_id']}): "
-              f"{c['description']}. {c['backstory']}. Wound: {c['wound']}." for c in available_cast(cast)]
-    first_free = max(int(c["character_id"][1:]) for c in cast) + 1
-    new_ids = [character_id(first_free + i) for i in range(MAX_NEW_CHARACTERS)]
-    lines.append(f"Ids for new characters, if any: {', '.join(new_ids)}.")
+              f"{c['description']}. {c['backstory']}. Wound: {c['wound']}." for c in available_cast(cast, sid)]
+    if allow_new:
+        first_free = max(int(c["character_id"][1:]) for c in cast) + 1
+        new_ids = [character_id(first_free + i) for i in range(MAX_NEW_CHARACTERS)]
+        lines.append(f"Ids for new characters, if any: {', '.join(new_ids)}.")
+    else:
+        lines.append("The casting director has already cast this season: do not invent characters; new_characters must be [].")
     recent = sorted(stories, key=lambda s: int(s["episode"]))[-5:]
     if recent:
         lines.append("Recent episodes:")
@@ -102,7 +108,8 @@ def _text(value) -> str:
     return ";".join(map(str, value)) if isinstance(value, list) else str(value or "").strip()
 
 
-def ingest(data: dict, episode: int, cast: list[dict]) -> tuple[dict, list[dict], list[dict], list[dict], list[str]]:
+def ingest(data: dict, episode: int, cast: list[dict],
+           allow_new: bool = True) -> tuple[dict, list[dict], list[dict], list[dict], list[str]]:
     """Turn model JSON into CSV-ready rows. Returns (story, scenes, callbacks, new_characters, errors)."""
     sid = story_id(episode)
     first_free = max(int(c["character_id"][1:]) for c in cast) + 1
@@ -135,6 +142,8 @@ def ingest(data: dict, episode: int, cast: list[dict]) -> tuple[dict, list[dict]
         return {}, [], [], [], [f"{sid}: malformed response ({type(e).__name__}: {e})"]
 
     errors = []
+    if new_chars and not allow_new:
+        errors.append(f"{sid}: new_characters must be [] (the season is already cast)")
     if len(new_chars) > MAX_NEW_CHARACTERS:
         errors.append(f"{sid}: {len(new_chars)} new characters (max {MAX_NEW_CHARACTERS})")
     used_voices = {c["voice_id"] for c in cast}
@@ -147,7 +156,7 @@ def ingest(data: dict, episode: int, cast: list[dict]) -> tuple[dict, list[dict]
         used_voices.add(c["voice_id"])
         errors += [f"{sid}: {e}" for e in check_character(c)]
 
-    allowed = {c["character_id"] for c in available_cast(cast)} | {c["character_id"] for c in new_chars}
+    allowed = {c["character_id"] for c in available_cast(cast, sid)} | {c["character_id"] for c in new_chars}
     errors += check_episode(story, scenes, allowed)
     errors += [f"{sid}: callback payoff {c['payoff_episode']} must come after this episode"
                for c in cbs if c["payoff_episode"] <= sid]
@@ -161,8 +170,8 @@ def save(story: dict, scenes: list[dict], cbs: list[dict], new_chars: list[dict]
     append_csv("callbacks.csv", CALLBACK_FIELDS, cbs)
 
 
-def call_api(client, user_prompt: str, feedback: str = "") -> dict:
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": user_prompt}]
+def call_api(client, user_prompt: str, feedback: str = "", system: str = SYSTEM_PROMPT) -> dict:
+    messages = [{"role": "system", "content": system}, {"role": "user", "content": user_prompt}]
     if feedback:
         messages.append({"role": "user", "content": f"Your previous draft was rejected:\n{feedback}\nFix these and return the full JSON again."})
     resp = client.chat.completions.create(
