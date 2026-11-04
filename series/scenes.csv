@@ -1,1 +1,13 @@
 story_id,scene_id,duration_s,characters,action,camera,speaker,dialogue,sfx,transition
+S0001,1,5,C003,looks at a cat carrier with curiosity.,close-up on the carrier,,,soft meowing,cut
+S0001,2,5,C001;C002,"emerge from the carrier, unsure.",wide shot of the room,,,scratching sounds,cut
+S0001,3,5,C001,sniffs a nearby food bowl eagerly.,close-up on Mango,C001,"Finally, food!",crunching noise,cut
+S0001,4,5,C002,watches Mango with skepticism.,medium shot,C002,Typical show-off.,hissing sound,cut
+S0001,5,5,C003,"sits on the floor, watching the cats play.",wide shot,,,soft purring,cut
+S0001,6,5,C001;C002,tentatively approach each other.,close-up on the cats,C001,"We could team up, y'know.",faint playful swatting,cut
+S0001,7,5,C002,"pauses, considering the offer.",medium shot,C002,What’s in it for me?,squishy toy noise,cut
+S0001,8,5,C003,"smiles quietly, feeling a sense of belonging.",close-up on the human’s hands,,,soft sigh of contentment,cut
+S0001,9,5,C001;C002,start to play together with a toy.,wide shot of the room,C001,Let’s see who’s faster!,toys clattering,cut
+S0001,10,5,C002,challenges Mango to a race.,close-up on Shadow,C002,"You’re on, diva!",running paws,cut
+S0001,11,5,C003,watches them with joy.,medium shot of the human,,,laughter,cut
+S0001,12,5,C001;C002;C003,playfully collapse together in a heap.,wide shot of the three,,,contented purring,fade
