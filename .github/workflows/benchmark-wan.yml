@@ -1,0 +1,103 @@
+name: Benchmark Wan 2.1
+# Measures how long Wan 2.1 T2V 1.3B takes on a free CPU runner, using
+# stable-diffusion.cpp. Each config runs on its own runner in parallel with a
+# small step count; per-step time is then extrapolated to a full render.
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: Diffusion model file
+        type: choice
+        options: [q4_0-gguf, fp16-safetensors]
+        default: q4_0-gguf
+
+env:
+  SD_REF: master-1047-984eb06
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/cache@v4
+        id: cache
+        with:
+          path: bin
+          key: sdcpp-cpu-${{ env.SD_REF }}
+      - name: Build stable-diffusion.cpp (CPU)
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth 1 --branch "$SD_REF" --recursive --shallow-submodules \
+            https://github.com/leejet/stable-diffusion.cpp sdcpp
+          cmake -S sdcpp -B sdcpp/build -DCMAKE_BUILD_TYPE=Release -DSD_WEBP=OFF -DSD_WEBM=OFF
+          cmake --build sdcpp/build --config Release -j "$(nproc)"
+          mkdir -p bin
+          cp "$(find sdcpp/build -type f -name sd-cli -perm -u+x | head -1)" bin/sd-cli
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sd-cli
+          path: bin/sd-cli
+
+  bench:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 358
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # name, width x height, frames (4n+1), sampling steps
+          - { name: small-240p-33f, w: 416, h: 240, frames: 33, steps: 2 }
+          - { name: 480p-9f,        w: 832, h: 480, frames: 9,  steps: 2 }
+          - { name: 480p-17f,       w: 832, h: 480, frames: 17, steps: 2 }
+          - { name: 480p-33f,       w: 832, h: 480, frames: 33, steps: 1 }
+          - { name: 480p-81f-plan,  w: 832, h: 480, frames: 81, steps: 1 }   # the plan's 5 s @ 16 fps
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: sd-cli
+      - run: chmod +x sd-cli && nproc && free -g && df -h .
+
+      - name: Download models
+        run: |
+          mkdir -p m
+          if [ "${{ inputs.model }}" = "fp16-safetensors" ]; then
+            DIT=https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/diffusion_models/wan2.1_t2v_1.3B_fp16.safetensors
+          else
+            DIT=https://huggingface.co/calcuis/wan-1.3b-gguf/resolve/main/wan2.1_t2v_1.3b-q4_0.gguf
+          fi
+          curl -fsSL --retry 3 -o "m/dit.${DIT##*.}" "$DIT"
+          curl -fsSL --retry 3 -o m/umt5.gguf https://huggingface.co/city96/umt5-xxl-encoder-gguf/resolve/main/umt5-xxl-encoder-Q4_K_S.gguf
+          curl -fsSL --retry 3 -o m/vae.safetensors https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/vae/wan_2.1_vae.safetensors
+          ls -la m
+
+      - name: Generate
+        timeout-minutes: 340
+        run: |
+          set -o pipefail
+          mkdir -p out
+          /usr/bin/time -v -o time.txt ./sd-cli -M vid_gen -v -t "$(nproc)" \
+            --diffusion-model m/dit.* --t5xxl m/umt5.gguf --vae m/vae.safetensors --vae-tiling \
+            -p "a large fluffy orange tabby cat with a torn left ear stares at a cardboard box, anime style" \
+            -n "blurry, static, low quality, deformed, extra legs" \
+            --cfg-scale 6.0 --sampling-method euler --flow-shift 3.0 --seed 42 \
+            -W ${{ matrix.w }} -H ${{ matrix.h }} --video-frames ${{ matrix.frames }} --steps ${{ matrix.steps }} \
+            -o out/${{ matrix.name }}.avi 2>&1 | tee run.log
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "## ${{ matrix.name }} (${{ matrix.w }}x${{ matrix.h }}, ${{ matrix.frames }} frames, ${{ matrix.steps }} steps, ${{ inputs.model }})"
+            echo '```'
+            grep -iE "taking|completed|s/it|it/s|error|fail" run.log | tail -40 || true
+            grep -E "Elapsed|Maximum resident" time.txt || echo "no /usr/bin/time output (step timed out or crashed)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bench-${{ matrix.name }}
+          path: |
+            run.log
+            time.txt
+            out/
