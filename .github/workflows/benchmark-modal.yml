@@ -1,0 +1,48 @@
+name: Benchmark Modal Video
+# Times one Wan 2.1 1.3B clip on Modal GPUs and reports the cost per episode and per month.
+# Spends Modal credit (a few cents per GPU).
+on:
+  workflow_dispatch:
+    inputs:
+      steps:
+        description: Sampling steps
+        default: '25'
+      size:
+        description: WIDTHxHEIGHT
+        default: 832x480
+      frames:
+        description: Frames (4n+1; 81 = 5 s at 16 fps)
+        default: '81'
+
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      max-parallel: 1   # the first job fills the weights Volume; the second reuses it
+      matrix:
+        gpu: [L4, L40S]
+    env:
+      MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+      MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install modal
+      - name: Generate one clip on ${{ matrix.gpu }}
+        run: |
+          set -o pipefail
+          size="${{ inputs.size }}"
+          modal run scripts/modal_video.py --gpu ${{ matrix.gpu }} --steps ${{ inputs.steps }} \
+            --width "${size%x*}" --height "${size#*x}" --frames ${{ inputs.frames }} --out out/modal | tee run.log
+          { echo "## Modal ${{ matrix.gpu }}"; echo '```json'; cat out/modal/*.json; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: modal-${{ matrix.gpu }}
+          path: |
+            out/modal/
+            run.log
