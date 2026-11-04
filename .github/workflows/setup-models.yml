@@ -84,9 +84,10 @@ jobs:
             ~/.cache/huggingface
           key: models-music-sao-small-torch271
       # CPU torch first so the pinned torch==2.7.1 is satisfied without the CUDA wheels.
+      # numpy<2: stable-audio-tools pins PyWavelets 1.4.1, which is built against numpy 1.x.
       - run: |
           pip install torch==2.7.1 torchaudio==2.7.1 --index-url https://download.pytorch.org/whl/cpu
-          pip install stable-audio-tools
+          pip install stable-audio-tools "numpy<2"
       - name: Render S0001 music bed
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
