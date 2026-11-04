@@ -30,14 +30,14 @@ def write_package(season_no: int) -> str:
         scenes.setdefault(s["story_id"], []).append(s)
     for s in read_csv("shots.csv"):
         shots.setdefault(s["story_id"], {})[s["scene_id"]] = s
-    cast = [c for c in read_csv("characters.csv") if c["first_episode"] <= ids[-1]]
+    cast = [c for c in read_csv("characters.csv") if c["series"] == str(season_no)]
     names = {c["character_id"]: c["name"] for c in cast}
     continuity = [r for r in read_csv("continuity.csv") if r["story_id"] in ids]
-    locations = [l for l in read_csv("locations.csv") if l["first_episode"] <= ids[-1]]
+    locations = [l for l in read_csv("locations.csv") if ids[0] <= l["first_episode"] <= ids[-1]]
     flagged = {f["story_id"]: f for f in plan.get("flagged", [])}
     c = plan["concept"]
 
-    md = [f"# Season {season_no}: {c['title']}", "",
+    md = [f"# Series {season_no}: {c['title']}", "",
           f"Episodes {ids[0]}-{ids[-1]} · {len(stories)}/{len(ids)} written · "
           f"{sum(1 for s in stories.values() if s['status'] == 'approved')} approved by the story editor", ""]
 

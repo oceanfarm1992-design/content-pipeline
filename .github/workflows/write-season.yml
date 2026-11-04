@@ -1,5 +1,5 @@
-name: Write Season
-# Once a month, write the next 30-episode season (showrunner -> story editor -> casting -> screenwriter ->
+name: Write Series
+# Once a month, write the next 30-episode series (showrunner -> story editor -> casting -> screenwriter ->
 # story editor -> film director -> season package)
 # on a season-<n> branch and open a pull request. Merging the pull request approves the season.
 # Runs on the 25th so there are a few days to review before the month starts.
@@ -30,12 +30,12 @@ jobs:
         run: |
           python - <<'EOF' >> "$GITHUB_OUTPUT"
           import sys; sys.path.insert(0, "scripts")
-          from common import read_csv, season_for
+          from common import read_csv, series_slot
           stories = read_csv("stories.csv")
           nxt = max((int(s["episode"]) for s in stories), default=0) + 1
-          season, _, _ = season_for(nxt, read_csv("seasons_plan.csv"))
-          print(f"number={season['season']}")
-          print(f"title={season['title']}")
+          row, number, _, _ = series_slot(nxt, read_csv("seasons_plan.csv"))
+          print(f"number={number}")
+          print(f"title={(row and (row['title'] or row['logline'])) or 'new series'}")
           EOF
       # Continue an unmerged branch from an earlier (partial) run instead of starting over.
       - name: Check out season-${{ steps.season.outputs.number }}

@@ -1,7 +1,10 @@
-"""Write the next season (30 episodes, one per day for a month) the way a drama is developed:
+"""Write the next series (30 episodes, one per day for a month) the way a drama is developed:
 story first, characters second, screenplay third, visual production last.
 
-  1. showrunner        drama concept, four acts, a beat per episode, locations, who new is needed
+Each series is a standalone vertical micro-drama. If seasons_plan.csv has no row for it, the showrunner develops
+the concept from series/channel_brief.md and the row is added; a row you add yourself fixes the concept.
+
+  1. showrunner        drama concept, four acts, a beat per episode, locations, the cast it needs (leads included)
   2. story editor      checks the outline against the quality checklist; weak outlines are rewritten
   3. casting director  full character bible + Kokoro voice for each new character
   4. screenwriter      each episode's 12-scene script, checked against the story bible
@@ -25,21 +28,24 @@ import sys
 
 from common import (ACTS, CHAPTER_FIELDS, CHARACTER_FIELDS, LOCATION_FIELDS, MAX_CHARACTERS_PER_SCENE, MOVEMENTS,
                     REGISTERS, SERIES, SHOT_FIELDS, SHOT_SIZES, VOICES, append_csv, character_id, read_csv,
-                    season_for, story_id)
+                    series_slot, story_id, write_csv)
 from generate_stories import (MAX_ATTEMPTS, NEW_CHARACTER_KEYS, SYSTEM_PROMPT as WRITER_PROMPT, _slug, _text,
                               available_cast, bible_text, build_user_prompt, call_api, ingest, save)
 from validate_stories import check_character
 
 PLANS = SERIES / "season_plans"
-MAX_NEW_CAST = 6
+BRIEF = SERIES / "channel_brief.md"
+SEASON_FIELDS = ["season", "title", "episode_count", "logline", "main_arc", "finale_hook"]
+MAX_NEW_CAST = 8
 EDIT_ROUNDS = 2          # editor rejections before an episode is left 'pending' for a human
 MIN_SCORE = 3            # editor scores are 1-5; anything lower is a rejection
 
-SHOWRUNNER_PROMPT = f"""You are the showrunner of "The Box Debates," a serialized photorealistic short-form drama
-about two broken cats (Mango, Shadow) and a lonely human learning to be a family. Each episode is 60 seconds, so
-every episode needs one clear, visual beat. Develop the season as a complete drama before any scene is written.
+SHOWRUNNER_PROMPT = f"""You are the showrunner of a channel of photorealistic vertical (9:16) micro-drama series.
+Each series is standalone; each episode is 60 seconds, so every episode needs one clear, visual beat and ends on a
+hook. Follow the channel brief you are given. Develop the series as a complete drama before any scene is written.
 
-1. Drama concept: title, concept (2 sentences), genre, target audience, main message, central conflict, ending concept.
+1. Drama concept: title (states the whole premise in one line, like the brief's examples), concept (2 sentences),
+   genre, target audience, main message, central conflict, ending concept.
 2. Exactly 4 acts as chapters, contiguous, together covering every episode once:
    Act 1 {ACTS[0]}: introduce the characters and their world, create curiosity, introduce the main problem.
    Act 2 {ACTS[1]}: raise tension, obstacles, emotional situations, deepen relationships, unexpected events.
@@ -50,8 +56,9 @@ every episode needs one clear, visual beat. Develop the season as a complete dra
    season opens on a strong hook. Earn cliffhangers; don't force one every episode.
 4. Locations: the 3-6 recurring sets the season is filmed in (name, what it looks like, its usual lighting).
    Keep scenes producible: at most {MAX_CHARACTERS_PER_SCENE} characters on screen at once.
-5. New characters the season needs beyond the existing cast (at most {MAX_NEW_CAST}): name, role ("recurring" or
-   "guest"), first episode, and why the story needs them.
+5. The cast the series needs beyond any existing cast (at most {MAX_NEW_CAST}): name, role ("main" for the leads,
+   who appear from the first episode; "recurring"; or "guest" for one episode), first episode, and why the story
+   needs them. Include the animal ally if the concept has one (role main or recurring).
 
 Return ONLY JSON:
 {{"concept": {{"title", "concept", "genre", "audience", "message", "central_conflict", "ending"}},
@@ -61,14 +68,15 @@ Return ONLY JSON:
   "new_cast": [{{"name", "role", "first_episode", "purpose"}}]}}
 Episode numbers are integers. "characters" lists the names appearing in that episode."""
 
-CASTING_PROMPT = f"""You are the casting director for "The Box Debates," a photorealistic short-form series. For each
-new character the showrunner needs, write the full character bible entry a cinematographer, a costume designer and a
+CASTING_PROMPT = f"""You are the casting director of a photorealistic vertical micro-drama series. For each new
+character the showrunner needs, write the full character bible entry a cinematographer, a costume designer and a
 voice director can use. Appearance and clothing stay identical in every episode unless the story changes them.
 
-- age; description: concrete photographic appearance (species, breed, build, colours, markings). Adults look clearly adult.
+- age; description: concrete photographic appearance. People: ethnicity, build, a distinctive face (face shape, eyes,
+  brows, nose), hair colour and style. Animals: species, breed, size, coat colour and markings. Adults look clearly adult.
 - clothing: exactly what they wear (or "none (no collar)" for an animal without one).
 - traits (personality), strengths, weaknesses: separated by ';'. motivation, backstory, wound, fear, arc: one sentence each.
-- relationships: how they relate to Mango, Shadow, The Human and anyone else, separated by ';'.
+- relationships: how they relate to each other character, separated by ';'.
 - never_change: 2-4 visual traits that stay identical in every scene, separated by ';'.
 - negative: visual traits the artist must avoid (comma-separated), or "".
 - voice_id: one of {", ".join(sorted(VOICES))} (a=American, b=British, f=female, m=male), matching the character,
@@ -77,7 +85,7 @@ voice director can use. Appearance and clothing stay identical in every episode 
 
 Return ONLY JSON: {{"new_characters": [{{{", ".join(f'"{k}"' for k in NEW_CHARACTER_KEYS + ["first_episode"])}}}]}}"""
 
-EDITOR_PROMPT = f"""You are the story editor of "The Box Debates." Nothing goes to video production until it is good.
+EDITOR_PROMPT = f"""You are the story editor of a vertical micro-drama series. Nothing goes to video production until it is good.
 Judge the material you are given against this checklist and score each 1-5 (3 = acceptable):
 - opening: does the opening capture attention?
 - characters: are the characters believable and consistent with their bible?
@@ -87,14 +95,15 @@ Judge the material you are given against this checklist and score each 1-5 (3 = 
 - ending: is the ending satisfying for this unit (or an earned cliffhanger)?
 - continuity: no contradictions with the story bible (appearance, clothing, locations, events)?
 - producible: can every scene be filmed as 5-second shots with at most {MAX_CHARACTERS_PER_SCENE} characters, one clear
-  action, simple camera moves, and dialogue of 12 words or fewer?
+  action, simple camera moves, dialogue of 12 words or fewer, no front-on shots of someone speaking (there is no
+  lip-sync), and no talking animals on screen?
 approved is true only if every score is {MIN_SCORE} or more. If not, list concrete, fixable issues for the writer.
 
 Return ONLY JSON: {{"approved": true, "scores": {{"opening": 0, "characters": 0, "conflict": 0, "logic": 0,
 "emotion": 0, "ending": 0, "continuity": 0, "producible": 0}}, "issues": []}}"""
 
-DIRECTOR_PROMPT = f"""You are the film director of "The Box Debates," a photorealistic series filmed (rendered) one
-5-second shot per scene. Turn the episode's script into a shot list, one shot per scene.
+DIRECTOR_PROMPT = f"""You are the film director of a photorealistic vertical (9:16) micro-drama series filmed (rendered)
+one 5-second shot per scene. Turn the episode's script into a shot list, one shot per scene, composed for a tall frame.
 
 - shot_size: one of {", ".join(sorted(SHOT_SIZES))}.
 - angle: e.g. eye level, low angle, high angle, cat's-eye view, over the shoulder; include the lens (24mm wide, 50mm, 85mm portrait).
@@ -102,7 +111,9 @@ DIRECTOR_PROMPT = f"""You are the film director of "The Box Debates," a photorea
 - lighting: matches the scene's location and time of day; consistent within a location.
 - image_prompt: a self-contained photorealistic text-to-image prompt for the shot's key frame (cinematic still, lens,
   depth of field): composition, each visible character's exact appearance and clothing (from their bible), pose and
-  expression, the location and the lighting. No dialogue, no text in frame. The Human's face is never shown.
+  expression, the location and the lighting, starting with "vertical 9:16 cinematic still". No text in frame.
+- There is no lip-sync: in a scene with dialogue, frame the listener's reaction, the speaker from behind, in profile
+  or over the shoulder, or their hands; never a front-on shot of a moving mouth.
 - motion_prompt: what moves during the 5 seconds, under 25 words.
 - Vary framing for rhythm; open on an establishing shot; save close-ups for the emotional turn.
 
@@ -146,14 +157,24 @@ def check_review(data: dict) -> tuple[dict, list[str]]:
 
 # --- 1. showrunner -------------------------------------------------------------------------------------------
 
-def showrunner_prompt(season: dict, first: int, last: int, stories: list[dict], cast: list[dict],
-                      callbacks: list[dict], locations: list[dict], continuity: list[dict]) -> str:
-    lines = [f"Plan Season {season['season']}: {season['title']}, episodes {first} to {last}.",
-             f"Logline: {season['logline']}", f"Arc: {season['main_arc']}",
-             f"Finale hook (episode {last}): {season['finale_hook']}", "Existing cast:"]
-    lines += [f"- {c['name']} ({c['species']}, {c['role']}, age {c['age']}): {c['description']}. "
-              f"Motivation: {c['motivation']}. Arc: {c['arc']}. Relationships: {c['relationships']}."
-              for c in cast if c["role"] != "guest"]
+def showrunner_prompt(row: dict | None, number: int, first: int, last: int, stories: list[dict], cast: list[dict],
+                      callbacks: list[dict], locations: list[dict], continuity: list[dict], brief: str) -> str:
+    """`cast`, `locations`, `continuity` and `stories` are already limited to this series."""
+    lines = [f"CHANNEL BRIEF:\n{brief}", "",
+             f"Develop Series {number}: episodes {first} to {last} ({last - first + 1} episodes)."]
+    if row:
+        lines.append("The producer has fixed this much of the concept; build everything on it and develop the rest:")
+        lines += [f"- {label}: {row[key]}" for label, key in
+                  (("Title", "title"), ("Premise", "logline"), ("Arc", "main_arc"), (f"Ending (episode {last})", "finale_hook"))
+                  if row.get(key, "").strip()]
+    else:
+        lines.append("Pitch and develop a new, original concept for this series that fits the brief "
+                     "(do not reuse the brief's example titles).")
+    if cast:
+        lines.append("Cast already in this series:")
+        lines += [f"- {c['name']} ({c['species']}, {c['role']}, age {c['age']}): {c['description']}. "
+                  f"Motivation: {c['motivation']}. Arc: {c['arc']}. Relationships: {c['relationships']}."
+                  for c in cast if c["role"] != "guest"]
     if locations:
         lines.append("Locations already established (reuse them where they fit): " + ", ".join(l["name"] for l in locations))
     earlier = sorted(stories, key=lambda s: int(s["episode"]))[-8:]
@@ -170,7 +191,8 @@ def showrunner_prompt(season: dict, first: int, last: int, stories: list[dict], 
     return "\n".join(lines)
 
 
-def check_plan(data: dict, first: int, last: int, known_locations: list[dict]) -> tuple[dict, list[str]]:
+def check_plan(data: dict, first: int, last: int, known_locations: list[dict],
+               need_leads: bool = False) -> tuple[dict, list[str]]:
     errors = []
     try:
         concept = {k: str(data["concept"].get(k, "")).strip()
@@ -210,17 +232,21 @@ def check_plan(data: dict, first: int, last: int, known_locations: list[dict]) -
     if len(new_cast) > MAX_NEW_CAST:
         errors.append(f"{len(new_cast)} new characters (max {MAX_NEW_CAST})")
     for n in new_cast:
-        if n["role"] not in ("recurring", "guest"):
-            errors.append(f"new cast '{n.get('name')}': role must be recurring or guest")
+        if n["role"] not in ("main", "recurring", "guest"):
+            errors.append(f"new cast '{n.get('name')}': role must be main, recurring or guest")
         if not first <= n["first_episode"] <= last:
             errors.append(f"new cast '{n.get('name')}': first_episode must be within {first}-{last}")
+        if n["role"] == "main" and n["first_episode"] != first:
+            errors.append(f"new cast '{n.get('name')}': a main character appears from episode {first}")
+    if need_leads and not any(n["role"] == "main" for n in new_cast):
+        errors.append("a new series needs its leads: at least one new_cast entry with role main")
     return {"concept": concept, "chapters": chapters, "episodes": episodes, "locations": locations,
             "new_cast": new_cast}, errors
 
 
 def outline_review_prompt(plan: dict) -> str:
     c = plan["concept"]
-    lines = [f"Review this season outline. Drama: {c['title']} ({c['genre']}, for {c['audience']}). {c['concept']} "
+    lines = [f"Review this series outline. Drama: {c['title']} ({c['genre']}, for {c['audience']}). {c['concept']} "
              f"Message: {c['message']}. Central conflict: {c['central_conflict']}. Ending: {c['ending']}.",
              "Locations: " + "; ".join(f"{l['name']} ({l['description']})" for l in plan["locations"])]
     for ch in plan["chapters"]:
@@ -234,10 +260,13 @@ def outline_review_prompt(plan: dict) -> str:
 # --- 3. casting director -------------------------------------------------------------------------------------
 
 def casting_prompt(plan: dict, cast: list[dict], first_id: int) -> str:
-    lines = ["Voices already taken: " + ", ".join(sorted({c["voice_id"] for c in cast})) + ".",
-             f"Drama: {plan['concept']['concept']}", "Existing cast (for style and relationships):"]
-    lines += [f"- {c['name']} ({c['species']}): {c['description']}. Wears: {c['clothing']}." for c in cast
-              if c["role"] != "guest"]
+    """`cast` is this series' existing cast (voices only need to be unique within a series)."""
+    lines = ["Voices already taken: " + (", ".join(sorted({c["voice_id"] for c in cast})) or "none") + ".",
+             f"Drama: {plan['concept']['title']} - {plan['concept']['concept']}"]
+    if cast:
+        lines.append("Existing cast (for style and relationships):")
+        lines += [f"- {c['name']} ({c['species']}): {c['description']}. Wears: {c['clothing']}." for c in cast
+                  if c["role"] != "guest"]
     lines.append("Cast these new characters:")
     for i, n in enumerate(plan["new_cast"]):
         lines.append(f"- character_id {character_id(first_id + i)}, name {n['name']}, role {n['role']}, "
@@ -245,7 +274,7 @@ def casting_prompt(plan: dict, cast: list[dict], first_id: int) -> str:
     return "\n".join(lines)
 
 
-def check_cast(data: dict, plan: dict, cast: list[dict], first_id: int) -> tuple[list[dict], list[str]]:
+def check_cast(data: dict, plan: dict, cast: list[dict], first_id: int, series: int) -> tuple[list[dict], list[str]]:
     try:
         rows = [{k: _text(c.get(k)) for k in NEW_CHARACTER_KEYS} for c in data["new_characters"]]
     except (KeyError, TypeError, AttributeError) as e:
@@ -256,7 +285,7 @@ def check_cast(data: dict, plan: dict, cast: list[dict], first_id: int) -> tuple
     used = {c["voice_id"] for c in cast}
     for i, (row, need) in enumerate(zip(rows, plan["new_cast"])):
         cid = character_id(first_id + i)
-        row.update(character_id=cid, name=need["name"], role=need["role"],
+        row.update(character_id=cid, name=need["name"], role=need["role"], series=str(series),
                    first_episode=story_id(need["first_episode"]), reference_sheet=f"series/refs/{cid}.png")
         if row["voice_id"] in used:
             errors.append(f"{cid} {row['name']}: voice {row['voice_id']} is already taken")
@@ -338,15 +367,24 @@ def save_plan(path, plan: dict) -> None:
     path.write_text(json.dumps(plan, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
-def plan_season(client, fixtures, season: dict, first: int, last: int) -> dict:
+def in_series(rows: list[dict], first: int, last: int, key: str = "story_id") -> list[dict]:
+    lo, hi = story_id(first), story_id(last)
+    return [r for r in rows if lo <= r[key] <= hi]
+
+
+def plan_season(client, fixtures, row: dict | None, number: int, first: int, last: int, todo_from: int) -> dict:
     """Showrunner -> story editor loop. Returns the approved outline (with its reviews)."""
-    locations = read_csv("locations.csv")
-    prompt = showrunner_prompt(season, first, last, read_csv("stories.csv"), read_csv("characters.csv"),
-                               read_csv("callbacks.csv"), locations, read_csv("continuity.csv"))
+    cast = [c for c in read_csv("characters.csv") if c["series"] == str(number)]
+    locations = in_series(read_csv("locations.csv"), first, last, "first_episode")
+    brief = BRIEF.read_text(encoding="utf-8") if BRIEF.exists() else ""
+    prompt = showrunner_prompt(row, number, todo_from, last, in_series(read_csv("stories.csv"), first, last), cast,
+                               in_series(read_csv("callbacks.csv"), first, last, "setup_episode"), locations,
+                               in_series(read_csv("continuity.csv"), first, last), brief)
+    need_leads = not any(c["role"] == "main" for c in cast)
     feedback, review = "", None
     for rnd in range(EDIT_ROUNDS + 1):
         plan = ask(client, fixtures, "showrunner", SHOWRUNNER_PROMPT, prompt,
-                   lambda d: check_plan(d, first, last, locations), feedback)
+                   lambda d: check_plan(d, todo_from, last, locations, need_leads), feedback)
         review = ask(client, fixtures, "editor_outline", EDITOR_PROMPT, outline_review_prompt(plan), check_review)
         print(f"Editor:   outline round {rnd + 1}: {'approved' if review['approved'] else 'rejected'} {review['scores']}")
         if review["approved"]:
@@ -361,17 +399,12 @@ def main() -> int:
     ap.add_argument("--fixtures", help="directory of <step>.json responses to use instead of the API")
     args = ap.parse_args()
 
-    seasons = read_csv("seasons_plan.csv")
     stories = read_csv("stories.csv")
     next_ep = max((int(s["episode"]) for s in stories), default=0) + 1
-    try:
-        season, n, _ = season_for(next_ep, seasons)
-    except ValueError:
-        print("Every season in seasons_plan.csv is written. Add the next season's row to continue.")
-        return 0
-    first, last = next_ep - n + 1, next_ep - n + int(season["episode_count"])
+    row, number, first, last = series_slot(next_ep, read_csv("seasons_plan.csv"))
     todo_from = next_ep
-    print(f"Season {season['season']} \"{season['title']}\": episodes {first}-{last}, writing from {todo_from}")
+    label = (f'"{row["title"] or row["logline"]}"' if row else "(new concept from the channel brief)")
+    print(f"Series {number} {label}: episodes {first}-{last}, writing from {todo_from}")
 
     client = None
     if not args.fixtures:
@@ -379,49 +412,63 @@ def main() -> int:
         client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
 
     PLANS.mkdir(exist_ok=True)
-    plan_path = PLANS / f"season_{season['season']}.json"
+    plan_path = PLANS / f"season_{number}.json"
     try:
         if plan_path.exists():
             plan = json.loads(plan_path.read_text(encoding="utf-8"))
             print(f"Resuming from {plan_path.name}")
         else:
-            plan = plan_season(client, args.fixtures, season, todo_from, last)
-            plan.update(season=int(season["season"]), cast_done=False, flagged=[])
+            plan = plan_season(client, args.fixtures, row, number, first, last, todo_from)
+            plan.update(season=number, cast_done=False, flagged=[])
             save_plan(plan_path, plan)
+            c = plan["concept"]
+            developed = {"season": str(number), "title": c["title"], "episode_count": str(last - first + 1),
+                         "logline": c["concept"], "main_arc": c["central_conflict"], "finale_hook": c["ending"]}
+            if not row:
+                append_csv("seasons_plan.csv", SEASON_FIELDS, [developed])
+            else:   # keep what the producer fixed, fill in what the showrunner developed
+                rows = [{**r, **{k: v for k, v in developed.items() if not r[k].strip()}} if r["season"] == str(number)
+                        else r for r in read_csv("seasons_plan.csv")]
+                write_csv("seasons_plan.csv", SEASON_FIELDS, rows)
             append_csv("chapters.csv", CHAPTER_FIELDS, [
-                {"season": season["season"], "chapter": c["chapter"], "title": c["title"],
-                 "first_episode": story_id(c["first_episode"]), "last_episode": story_id(c["last_episode"]),
-                 "summary": c["summary"]} for c in plan["chapters"]])
-            known = {l["name"].lower() for l in read_csv("locations.csv")}
+                {"season": number, "chapter": ch["chapter"], "title": ch["title"],
+                 "first_episode": story_id(ch["first_episode"]), "last_episode": story_id(ch["last_episode"]),
+                 "summary": ch["summary"]} for ch in plan["chapters"]])
+            known = {l["name"].lower() for l in in_series(read_csv("locations.csv"), first, last, "first_episode")}
             append_csv("locations.csv", LOCATION_FIELDS, [
                 {**l, "first_episode": story_id(todo_from)} for l in plan["locations"] if l["name"].lower() not in known])
-            print(f"Showrunner: \"{plan['concept']['title']}\", {len(plan['chapters'])} acts, "
-                  f"{len(plan['locations'])} locations, {len(plan['new_cast'])} new characters needed")
+            print(f'Showrunner: "{c["title"]}" ({c["genre"]}), {len(plan["chapters"])} acts, '
+                  f'{len(plan["locations"])} locations, {len(plan["new_cast"])} characters to cast')
 
         if not plan["cast_done"]:
-            cast = read_csv("characters.csv")
-            first_id = max(int(c["character_id"][1:]) for c in cast) + 1
+            everyone = read_csv("characters.csv")
+            cast = [ch for ch in everyone if ch["series"] == str(number)]
+            first_id = max((int(ch["character_id"][1:]) for ch in everyone), default=0) + 1
             if plan["new_cast"]:
                 rows = ask(client, args.fixtures, "casting", CASTING_PROMPT, casting_prompt(plan, cast, first_id),
-                           lambda d: check_cast(d, plan, cast, first_id))
+                           lambda d: check_cast(d, plan, cast, first_id, number))
                 append_csv("characters.csv", CHARACTER_FIELDS, rows)
                 print("Casting:  " + ", ".join(f"{r['character_id']} {r['name']} ({r['role']}, {r['voice_id']})" for r in rows))
             plan["cast_done"] = True
             save_plan(plan_path, plan)
 
+        seasons = read_csv("seasons_plan.csv")
         for episode in range(todo_from, last + 1):
             sid = story_id(episode)
-            stories, cast = read_csv("stories.csv"), read_csv("characters.csv")
-            locations, continuity = read_csv("locations.csv"), read_csv("continuity.csv")
+            stories = read_csv("stories.csv")
+            cast = [ch for ch in read_csv("characters.csv") if ch["series"] == str(number)]
+            locations = in_series(read_csv("locations.csv"), first, last, "first_episode")
+            continuity = in_series(read_csv("continuity.csv"), first, last)
             if not any(s["story_id"] == sid for s in stories):
                 outline = outline_for(plan, episode)
-                bible = bible_text(sid, cast, locations, continuity, plan["concept"])
-                prompt = build_user_prompt(episode, stories, read_csv("callbacks.csv"), seasons, cast,
-                                           outline=outline, allow_new=False, bible=bible)
+                bible = bible_text(sid, cast, locations, continuity, plan["concept"], series=number)
+                prompt = build_user_prompt(episode, in_series(stories, first, last), read_csv("callbacks.csv"), seasons,
+                                           cast, outline=outline, allow_new=False, bible=bible)
 
                 def check_script(d, episode=episode, cast=cast, locations=locations, continuity=continuity):
                     story, scenes, cbs, _new, cont_rows, errors = ingest(d, episode, cast, allow_new=False,
-                                                                         locations=locations, continuity=continuity)
+                                                                         locations=locations, continuity=continuity,
+                                                                         series=number)
                     return (story, scenes, cbs, cont_rows), errors
 
                 feedback, review = "", None
@@ -439,15 +486,14 @@ def main() -> int:
                     save_plan(plan_path, plan)
                 save(story, scenes, cbs, [], cont_rows)
                 low = min(review["scores"].values()) if review["scores"] else 0
-                print(f"Writer:   {sid} \"{story['title']}\" - editor {'approved' if review['approved'] else 'FLAGGED'} "
-                      f"(lowest score {low})")
+                verdict = "approved" if review["approved"] else "FLAGGED"
+                print(f'Writer:   {sid} "{story["title"]}" - editor {verdict} (lowest score {low})')
 
             if not any(s["story_id"] == sid for s in read_csv("shots.csv")):
                 story = next(s for s in read_csv("stories.csv") if s["story_id"] == sid)
                 scenes = [s for s in read_csv("scenes.csv") if s["story_id"] == sid]
                 shots = ask(client, args.fixtures, f"director_{sid}", DIRECTOR_PROMPT,
-                            director_prompt(story, scenes, available_cast(read_csv("characters.csv"), sid),
-                                            read_csv("locations.csv")),
+                            director_prompt(story, scenes, available_cast(cast, sid, number), locations),
                             lambda d, sid=sid, ids=[s["scene_id"] for s in scenes]: check_shots(d, sid, ids))
                 append_csv("shots.csv", SHOT_FIELDS, shots)
                 print(f"Director: {sid} {len(shots)} shots")
@@ -457,8 +503,8 @@ def main() -> int:
     finally:
         if plan_path.exists():
             from season_package import write_package
-            print(f"Package:  {write_package(int(season['season']))}")
-    print(f"Season {season['season']} written: episodes {todo_from}-{last}.")
+            print(f"Package:  {write_package(number)}")
+    print(f"Series {number} written: episodes {todo_from}-{last}.")
     return 0
 
 

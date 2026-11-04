@@ -16,6 +16,8 @@ def check_character(c: dict) -> list[str]:
             errors.append(f"{cid}: empty {col}")
     if c["role"] not in ROLES:
         errors.append(f"{cid}: bad role '{c['role']}'")
+    if not str(c.get("series", "")).isdigit():
+        errors.append(f"{cid}: series must be a series number, got '{c.get('series', '')}'")
     if c["voice_id"] not in VOICES:
         errors.append(f"{cid}: unknown Kokoro voice '{c['voice_id']}'")
     if not (len(c["first_episode"]) == 5 and c["first_episode"].startswith("S") and c["first_episode"][1:].isdigit()):

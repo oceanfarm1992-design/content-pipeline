@@ -27,9 +27,10 @@ NEW_CHARACTER_KEYS = ["character_id", "name", "species", "role", "age", "descrip
 SCENE_KEYS = ["scene_id", "duration_s", "location", "time_of_day", "characters", "action", "emotion", "camera",
               "speaker", "dialogue", "sfx", "transition"]
 
-SYSTEM_PROMPT = f"""You are the head writer for "The Box Debates," a serialized photorealistic short-form drama about two broken cats and a lonely human learning to be a family.
+SYSTEM_PROMPT = f"""You are the head writer of a photorealistic vertical (9:16) micro-drama series for TikTok and YouTube Shorts.
+The series concept, characters and story so far are in the story bible you are given.
 You think like a screenwriter, a drama director and an audience-retention strategist: every episode is a small,
-complete story people want to watch to the end, and every scene moves it forward.
+complete beat people want to watch to the end, every scene moves it forward, and the episode ends on a hook.
 
 FORMAT:
 - Each episode = 60 seconds = exactly {SCENES_PER_EPISODE} scenes of 5 seconds (duration_s is always 5).
@@ -50,6 +51,9 @@ STORYTELLING:
 PRODUCIBLE ON SCREEN:
 - At most {MAX_CHARACTERS_PER_SCENE} characters per scene. One clear physical action per scene. No impossible camera moves.
 - Characters look and dress exactly as in their bible entry unless the story deliberately changes it.
+- No lip-sync: dialogue is heard as voice while the camera shows the listener's reaction, hands, a profile, a back or an
+  over-the-shoulder view. Never write a long front-on close-up of someone speaking. Animals never talk on screen
+  (a lead who hears animals hears them as voice-over; the animal's speaker is that animal's id).
 
 CONTINUITY:
 - Check the story bible before writing: timeline, relationships, clothing, open threads, due payoffs.
@@ -57,12 +61,12 @@ CONTINUITY:
   "resolved" (ids of open threads this episode resolves, if any).
 
 CAST:
-- Use the cast you are given. Mango, Shadow and The Human anchor every season.
-- Introduce a new character when the story needs someone the cast lacks (a vet, the former owner, a kitten,
-  a neighbour's dog...). At most {MAX_NEW_CHARACTERS} per episode, using exactly the new ids you are given, in order.
-- role "recurring" if they will matter again this season or later; "guest" if they appear in this episode only.
-- description: concrete photographic appearance (species, breed, build, colours, markings, age). clothing: what they wear.
-  Adults look clearly adult. The Human's face is never shown.
+- Use the cast you are given; the series' main characters carry every episode.
+- Introduce a new character when the story needs someone the cast lacks. At most {MAX_NEW_CHARACTERS} per episode,
+  using exactly the new ids you are given, in order.
+- role "recurring" if they will matter again in this series; "guest" if they appear in this episode only.
+- description: concrete photographic appearance (species, breed or ethnicity, build, face, hair, colours, markings, age).
+  clothing: what they wear. Adults look clearly adult.
 - never_change: 2-4 visual traits that must stay identical in every scene, separated by ';'.
 - negative: visual traits the artist must avoid for this character (comma-separated), or "".
 - voice_id: one of {", ".join(sorted(VOICES))} (a=American, b=British, f=female, m=male). Do not reuse a voice already in the cast.
@@ -76,9 +80,10 @@ Return ONLY valid JSON with exactly these keys:
 "stories" has exactly one entry. "callbacks" lists setups planted in THIS episode (payoff_episode is an integer episode number greater than this one); use [] if none. "new_characters" is [] if nobody new appears."""
 
 
-def available_cast(cast: list[dict], sid: str) -> list[dict]:
-    """Characters episode `sid` may use: debuted by then, and guests only in their own episode."""
-    return [c for c in cast if c["first_episode"] <= sid and (c["role"] != "guest" or c["first_episode"] == sid)]
+def available_cast(cast: list[dict], sid: str, series=None) -> list[dict]:
+    """Characters episode `sid` may use: in this series, debuted by then, and guests only in their own episode."""
+    return [c for c in cast if (series is None or c["series"] == str(series)) and c["first_episode"] <= sid
+            and (c["role"] != "guest" or c["first_episode"] == sid)]
 
 
 def open_threads(continuity: list[dict]) -> dict[str, dict]:
@@ -90,8 +95,9 @@ def open_threads(continuity: list[dict]) -> dict[str, dict]:
     return opened
 
 
-def bible_text(sid: str, cast: list[dict], locations: list[dict], continuity: list[dict], concept: dict | None = None) -> str:
-    """The story bible as the writer sees it before episode `sid`."""
+def bible_text(sid: str, cast: list[dict], locations: list[dict], continuity: list[dict], concept: dict | None = None,
+               series=None) -> str:
+    """The story bible as the writer sees it before episode `sid` (cast and locations are already this series')."""
     lines = []
     if concept:
         lines.append(f"DRAMA: {concept.get('title', '')} - {concept.get('concept', '')} Genre: {concept.get('genre', '')}. "
@@ -101,7 +107,7 @@ def bible_text(sid: str, cast: list[dict], locations: list[dict], continuity: li
         lines.append("LOCATIONS (use these exact names):")
         lines += [f"- {loc['name']}: {loc['description']} Lighting: {loc['lighting']}." for loc in locations
                   if loc["first_episode"] <= sid]
-    rel = [c for c in available_cast(cast, sid) if c.get("relationships")]
+    rel = [c for c in available_cast(cast, sid, series) if c.get("relationships")]
     if rel:
         lines.append("RELATIONSHIPS:")
         lines += [f"- {c['name']}: {c['relationships']}" for c in rel]
@@ -134,9 +140,9 @@ def build_user_prompt(episode: int, stories: list[dict], callbacks: list[dict], 
     lines.append("Cast available in this episode:")
     lines += [f"- {c['character_id']} {c['name']} ({c['species']}, {c['role']}, age {c.get('age', '?')}, voice {c['voice_id']}): "
               f"{c['description']}. Wears: {c.get('clothing', '')}. Motivation: {c.get('motivation', '')}. "
-              f"Wound: {c['wound']}." for c in available_cast(cast, sid)]
+              f"Wound: {c['wound']}." for c in available_cast(cast, sid, season["season"])]
     if allow_new:
-        first_free = max(int(c["character_id"][1:]) for c in cast) + 1
+        first_free = max((int(c["character_id"][1:]) for c in cast), default=0) + 1
         new_ids = [character_id(first_free + i) for i in range(MAX_NEW_CHARACTERS)]
         lines.append(f"Ids for new characters, if any: {', '.join(new_ids)}.")
     else:
@@ -154,7 +160,7 @@ def build_user_prompt(episode: int, stories: list[dict], callbacks: list[dict], 
 
 
 def _ids(value) -> str:
-    """'C002 Shadow;C003 The Human' or ['C002', ...] -> 'C002;C003'."""
+    """'C002 Unit-7;C003 Maya' or ['C002', ...] -> 'C002;C003'."""
     text = ";".join(map(str, value)) if isinstance(value, list) else str(value or "")
     return ";".join(dict.fromkeys(re.findall(r"C\d{3}", text)))
 
@@ -174,10 +180,10 @@ def _slug(value) -> str:
 
 
 def ingest(data: dict, episode: int, cast: list[dict], allow_new: bool = True, locations: list[dict] | None = None,
-           continuity: list[dict] | None = None):
+           continuity: list[dict] | None = None, series=None):
     """Turn model JSON into CSV-ready rows. Returns (story, scenes, callbacks, new_characters, continuity, errors)."""
     sid = story_id(episode)
-    first_free = max(int(c["character_id"][1:]) for c in cast) + 1
+    first_free = max((int(c["character_id"][1:]) for c in cast), default=0) + 1
     continuity = continuity or []
     known_locations = {loc["name"].lower(): loc["name"] for loc in locations or [] if loc["first_episode"] <= sid}
     try:
@@ -203,7 +209,7 @@ def ingest(data: dict, episode: int, cast: list[dict], allow_new: bool = True, l
         for i, c in enumerate(data.get("new_characters") or []):
             row = {k: _text(c.get(k)) for k in NEW_CHARACTER_KEYS}
             row.update(character_id=_ids(row["character_id"]) or row["character_id"],
-                       role=row["role"].lower(), first_episode=sid)
+                       role=row["role"].lower(), first_episode=sid, series=str(series or ""))
             row["reference_sheet"] = f"series/refs/{row['character_id']}.png"
             row["_expected_id"] = character_id(first_free + i)
             new_chars.append(row)
@@ -233,7 +239,7 @@ def ingest(data: dict, episode: int, cast: list[dict], allow_new: bool = True, l
         used_voices.add(c["voice_id"])
         errors += [f"{sid}: {e}" for e in check_character(c)]
 
-    allowed = {c["character_id"] for c in available_cast(cast, sid)} | {c["character_id"] for c in new_chars}
+    allowed = {c["character_id"] for c in available_cast(cast, sid, series)} | {c["character_id"] for c in new_chars}
     errors += check_episode(story, scenes, allowed)
     if known_locations:
         errors += [f"{sid} scene {s['scene_id']}: location '{s['location']}' is not in the story bible "
@@ -285,9 +291,10 @@ def main() -> int:
             print(f"Series plan complete ({total} episodes); nothing more to write.")
             break
         sid = story_id(episode)
+        series = season_for(episode, seasons)[0]["season"]
 
         def attempt(data):
-            return ingest(data, episode, cast, locations=locations, continuity=continuity)
+            return ingest(data, episode, cast, locations=locations, continuity=continuity, series=series)
 
         if args.from_json:
             with open(args.from_json, encoding="utf-8") as f:
@@ -297,7 +304,7 @@ def main() -> int:
                 from openai import OpenAI
                 client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
             prompt = build_user_prompt(episode, stories, callbacks, seasons, cast,
-                                       bible=bible_text(sid, cast, locations, continuity))
+                                       bible=bible_text(sid, cast, locations, continuity, series=series))
             feedback = ""
             for n in range(1, MAX_ATTEMPTS + 1):
                 story, scenes, cbs, new_chars, cont_rows, errors = attempt(call_api(client, prompt, feedback))

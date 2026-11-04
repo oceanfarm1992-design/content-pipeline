@@ -1,4 +1,4 @@
-"""Shared constants and CSV helpers for The Box Debates pipeline."""
+"""Shared constants and CSV helpers for the micro-drama production pipeline."""
 import csv
 from pathlib import Path
 
@@ -10,7 +10,7 @@ SCENE_FIELDS = ["story_id", "scene_id", "duration_s", "location", "time_of_day",
                 "camera", "speaker", "dialogue", "sfx", "transition"]
 CALLBACK_FIELDS = ["setup_episode", "setup_moment", "payoff_episode", "payoff_moment"]
 # The character bible: appearance and clothing stay fixed unless the story changes them.
-CHARACTER_FIELDS = ["character_id", "name", "species", "role", "first_episode", "age", "description", "clothing",
+CHARACTER_FIELDS = ["character_id", "name", "species", "role", "series", "first_episode", "age", "description", "clothing",
                     "traits", "strengths", "weaknesses", "motivation", "backstory", "wound", "fear", "arc",
                     "relationships", "voice_id", "never_change", "negative", "reference_sheet"]
 # Story bible: recurring sets, and a continuity log of what happened and which threads are open.
@@ -29,7 +29,9 @@ SHOT_SIZES = {"extreme_wide", "wide", "medium", "medium_close", "close_up", "ext
 MOVEMENTS = {"static", "slow_push_in", "slow_pull_out", "pan_left", "pan_right", "tilt_up", "tilt_down",
              "tracking", "handheld"}
 
-# main: in every season. recurring: introduced by a story, may return. guest: one episode.
+SERIES_EPISODES = 30   # one standalone series per month, one 60 s episode per day
+
+# Every character belongs to one series. main: the series' leads. recurring: may return. guest: one episode.
 ROLES = {"main", "recurring", "guest"}
 MAX_NEW_CHARACTERS = 2
 # Kokoro voices the writer may cast from (a = American, b = British; f = female, m = male).
@@ -68,6 +70,13 @@ def read_csv(name: str) -> list[dict]:
         return list(csv.DictReader(f))
 
 
+def write_csv(name: str, fields: list[str], rows: list[dict]) -> None:
+    with open(SERIES / name, "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=fields, lineterminator="\n")
+        w.writeheader()
+        w.writerows(rows)
+
+
 def append_csv(name: str, fields: list[str], rows: list[dict]) -> None:
     with open(SERIES / name, "a", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=fields, lineterminator="\n")
@@ -84,3 +93,15 @@ def season_for(episode: int, seasons: list[dict]) -> tuple[dict, int, bool]:
             return s, n, n == count
         start += count
     raise ValueError(f"episode {episode} is past the end of the series plan")
+
+
+def series_slot(episode: int, seasons: list[dict]) -> tuple[dict | None, int, int, int]:
+    """(plan row or None, series number, first episode, last episode) for the series containing `episode`.
+    Past the end of seasons_plan.csv the next series is unplanned (None): the showrunner develops it."""
+    start = 1
+    for s in seasons:
+        count = int(s["episode_count"])
+        if episode < start + count:
+            return s, int(s["season"]), start, start + count - 1
+        start += count
+    return None, len(seasons) + 1, start, start + SERIES_EPISODES - 1

@@ -1,6 +1,6 @@
 # AI Drama Development Engine
 
-The writing contract for The Box Debates. `scripts/write_season.py` implements it; this table says where.
+The writing contract for every series on the channel (see series/channel_brief.md). `scripts/write_season.py` implements it; this table says where.
 
 | Section | Implemented in |
 |---|---|
