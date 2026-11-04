@@ -6,6 +6,7 @@
 import argparse
 import json
 import os
+import re
 import sys
 
 from common import (CALLBACK_FIELDS, REGISTERS, SCENE_FIELDS, SCENES_PER_EPISODE, STORY_FIELDS,
@@ -29,7 +30,8 @@ RULES:
 - life_lesson is shown through events, never stated aloud in dialogue.
 - future_tease: a one-line hint of a later episode or season, or "None". Plant one every 3-5 episodes.
 - Honour the continuity notes, due payoffs, and season position you are given.
-- transition is one of: cut, fade, dissolve, match_cut. Character ids in scenes are separated by ';'.
+- transition is one of: cut, fade, dissolve, match_cut.
+- Use bare ids only: characters "C001;C002", speaker "C001", scene_id 1..{SCENES_PER_EPISODE}, duration_s 5.
 
 Return ONLY valid JSON with exactly these keys:
 {{"stories": [{{"title","emotional_register","life_lesson","future_tease","hook","synopsis","characters_used","music_prompt"}}],
@@ -59,6 +61,18 @@ def build_user_prompt(episode: int, stories: list[dict], callbacks: list[dict], 
     return "\n".join(lines)
 
 
+def _ids(value) -> str:
+    """'C002 Shadow;C003 The Human' or ['C002', ...] -> 'C002;C003'."""
+    text = ";".join(map(str, value)) if isinstance(value, list) else str(value or "")
+    return ";".join(dict.fromkeys(re.findall(r"C\d{3}", text)))
+
+
+def _num(value) -> str:
+    """'S0002_02' or '5s' -> '2' / '5' (last run of digits, leading zeros dropped)."""
+    found = re.findall(r"\d+", str(value))
+    return str(int(found[-1])) if found else str(value).strip()
+
+
 def ingest(data: dict, episode: int, chars: set[str]) -> tuple[dict, list[dict], list[dict], list[str]]:
     """Turn model JSON into CSV-ready rows. Returns (story, scenes, callbacks, errors)."""
     sid = story_id(episode)
@@ -67,14 +81,13 @@ def ingest(data: dict, episode: int, chars: set[str]) -> tuple[dict, list[dict],
         story = {
             "story_id": sid, "episode": episode, "status": "pending",
             **{k: str(raw.get(k, "")).strip() for k in STORY_FIELDS[2:] if k != "status"},
+            "characters_used": _ids(raw.get("characters_used")),
         }
-        if isinstance(raw.get("characters_used"), list):
-            story["characters_used"] = ";".join(raw["characters_used"])
         scenes = []
         for r in data["scenes"]:
             row = {k: str(r.get(k, "")).strip() for k in SCENE_FIELDS[1:]}
-            if isinstance(r.get("characters"), list):
-                row["characters"] = ";".join(r["characters"])
+            row.update(scene_id=_num(r.get("scene_id")), duration_s=_num(r.get("duration_s")),
+                       characters=_ids(r.get("characters")), speaker=_ids(r.get("speaker")))
             scenes.append({"story_id": sid, **row})
         cbs = [{
             "setup_episode": sid, "setup_moment": str(c["setup_moment"]).strip(),
