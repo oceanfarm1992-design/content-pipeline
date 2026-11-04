@@ -10,6 +10,8 @@ Series 1 (Nov 2026): "A good AI robot tries to save a human from a bad AI robot.
 
 - Standalone vertical (9:16) micro-drama series, 30 episodes of 60 seconds, one episode a day for a month.
 - Each episode ends on a hook that makes the viewer need the next one; the series ends on a satisfying payoff.
+- After the last episode is posted, all 30 are joined into one ~30-minute full movie and uploaded once, so the
+  series must also play well back to back (no recap padding; each episode's hook flows into the next).
 - The series title states the whole premise in one line, like:
   "My Dog Fought the World for Me", "Come Home a Billionaire After Betrayal", "She Dumped Me Then Begged Me Back".
 
