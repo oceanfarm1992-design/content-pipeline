@@ -2,13 +2,14 @@ name: Setup Models
 # Downloads and caches each stage's models, then proves they run on a CPU runner:
 #   image -> character reference sheets with Anima-Turbo (series/refs/*.png)
 #   voice -> one line per character with Kokoro
+#   music -> a 60 s bed for S0001 with Stable Audio Open Small (needs the HF_TOKEN secret)
 on:
   workflow_dispatch:
     inputs:
       stages:
         description: Stages to set up
         type: choice
-        options: [all, image, voice]
+        options: [all, image, voice, music]
         default: all
 
 jobs:
@@ -66,3 +67,38 @@ jobs:
           path: |
             out/voice/
             voice.log
+
+  music:
+    if: inputs.stages == 'all' || inputs.stages == 'music'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'   # stable-audio-tools requires >=3.10,<3.11
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/pip
+            ~/.cache/huggingface
+          key: models-music-sao-small-torch271
+      # CPU torch first so the pinned torch==2.7.1 is satisfied without the CUDA wheels.
+      - run: |
+          pip install torch==2.7.1 torchaudio==2.7.1 --index-url https://download.pytorch.org/whl/cpu
+          pip install stable-audio-tools
+      - name: Render S0001 music bed
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          set -o pipefail
+          [ -n "$HF_TOKEN" ] || { echo "::error::Add an HF_TOKEN secret from an account that accepted the stable-audio-open-small terms"; exit 1; }
+          python scripts/generate_music.py --story S0001 --out out/music | tee music.log
+          { echo "## Music: Stable Audio Open Small"; sed -n '/^| story/,$p' music.log; } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: music-samples
+          path: |
+            out/music/
+            music.log
