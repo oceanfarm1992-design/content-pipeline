@@ -1,0 +1,4 @@
+character_id,name,species,description,traits,backstory,wound,fear,arc,voice_id,never_change,reference_sheet
+C001,Mango,cat,"large fluffy orange tabby, green eyes, torn left ear","dramatic;lazy;food-motivated","former show cat, surrendered, nearly euthanized","being discarded","returned to shelter","love without performance is real",af_bella,"orange fur;torn left ear;green eyes",series/refs/mango.png
+C002,Shadow,cat,"sleek black cat, yellow eyes, white chest patch","sarcastic;clever;aloof","born feral, caged 3 months, deemed unadoptable","being betrayed","human gives up on him","vulnerability is not weakness",am_michael,"black fur;white chest patch;yellow eyes",series/refs/shadow.png
+C003,The Human,human,"tired young adult, oversized hoodie, face out of frame","works from home;lonely","adopted both cats against shelter advice","loneliness","always be alone","being needed is not a burden",bm_george,"oversized hoodie;face out of frame",series/refs/human.png

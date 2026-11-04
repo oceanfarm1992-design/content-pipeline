@@ -1,0 +1,50 @@
+name: Generate Stories
+on:
+  schedule:
+    - cron: '0 1 * * *'
+  workflow_dispatch:
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements.txt
+
+      # Parse the CSV properly (quoted commas break awk). Unreviewed 'pending'
+      # drafts count toward the queue so we don't pile up unlimited drafts
+      # while waiting for approval.
+      - name: Check queue depth
+        id: queue
+        run: |
+          python - <<'EOF' >> "$GITHUB_OUTPUT"
+          import csv
+          rows = list(csv.DictReader(open("series/stories.csv", encoding="utf-8")))
+          queued = sum(r["status"] in ("pending", "approved") for r in rows)
+          print(f"queued={queued}")
+          print(f"need_more={'true' if queued < 20 else 'false'}")
+          EOF
+
+      - name: Generate stories via API
+        if: steps.queue.outputs.need_more == 'true'
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: python scripts/generate_stories.py --count 10
+
+      - name: Validate
+        run: python scripts/validate_stories.py
+
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add series/
+          git diff --cached --quiet && exit 0
+          git commit -m "auto: generate new stories"
+          git push
