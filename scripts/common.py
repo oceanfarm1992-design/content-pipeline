@@ -6,12 +6,20 @@ SERIES = Path(__file__).resolve().parent.parent / "series"
 
 STORY_FIELDS = ["story_id", "episode", "title", "status", "emotional_register", "life_lesson",
                 "future_tease", "hook", "synopsis", "characters_used", "music_prompt"]
-SCENE_FIELDS = ["story_id", "scene_id", "duration_s", "characters", "action", "camera",
-                "speaker", "dialogue", "sfx", "transition"]
+SCENE_FIELDS = ["story_id", "scene_id", "duration_s", "location", "time_of_day", "characters", "action", "emotion",
+                "camera", "speaker", "dialogue", "sfx", "transition"]
 CALLBACK_FIELDS = ["setup_episode", "setup_moment", "payoff_episode", "payoff_moment"]
-CHARACTER_FIELDS = ["character_id", "name", "species", "role", "first_episode", "description", "traits",
-                    "backstory", "wound", "fear", "arc", "voice_id", "never_change", "negative",
-                    "reference_sheet"]
+# The character bible: appearance and clothing stay fixed unless the story changes them.
+CHARACTER_FIELDS = ["character_id", "name", "species", "role", "first_episode", "age", "description", "clothing",
+                    "traits", "strengths", "weaknesses", "motivation", "backstory", "wound", "fear", "arc",
+                    "relationships", "voice_id", "never_change", "negative", "reference_sheet"]
+# Story bible: recurring sets, and a continuity log of what happened and which threads are open.
+LOCATION_FIELDS = ["name", "first_episode", "description", "lighting"]
+CONTINUITY_FIELDS = ["story_id", "kind", "thread_id", "note"]
+CONTINUITY_KINDS = {"event", "open", "resolved"}
+TIMES_OF_DAY = {"dawn", "morning", "midday", "afternoon", "golden_hour", "evening", "night", "late_night"}
+MAX_CHARACTERS_PER_SCENE = 3   # more than this per shot breaks image/video consistency
+ACTS = ["Introduction", "Conflict", "Climax", "Resolution"]
 
 CHAPTER_FIELDS = ["season", "chapter", "title", "first_episode", "last_episode", "summary"]
 SHOT_FIELDS = ["story_id", "scene_id", "shot_size", "angle", "movement", "lighting", "image_prompt", "motion_prompt"]

@@ -1,5 +1,6 @@
 name: Write Season
-# Once a month, write the next 30-episode season (showrunner -> casting -> screenwriter -> film director)
+# Once a month, write the next 30-episode season (showrunner -> story editor -> casting -> screenwriter ->
+# story editor -> film director -> season package)
 # on a season-<n> branch and open a pull request. Merging the pull request approves the season.
 # Runs on the 25th so there are a few days to review before the month starts.
 on:
@@ -75,10 +76,13 @@ jobs:
           {
             echo "Season ${{ steps.season.outputs.number }}: ${{ steps.season.outputs.title }}. $state"
             echo
-            echo "Merging this pull request approves every episode in it for rendering."
-            echo "Edit or delete rows in the CSVs on this branch before merging if anything needs changing."
+            echo "**Review:** [series/seasons/season_${{ steps.season.outputs.number }}.md](../blob/$b/series/seasons/season_${{ steps.season.outputs.number }}.md)"
+            echo "(drama concept, character bible, outline by act, screenplay, visual prompts, sound, continuity, readiness)."
             echo
-            echo '```'; grep -E "^(Season|Showrunner|Casting|Writer|Director|Stopped)" write.log || true; echo '```'
+            echo "Merging this pull request approves the episodes the story editor approved for rendering;"
+            echo "episodes it flagged stay 'pending'. Edit or delete rows in the CSVs on this branch before merging if anything needs changing."
+            echo
+            echo '```'; grep -E "^(Season|Showrunner|Editor|Casting|Writer|Director|Package|Stopped)" write.log || true; echo '```'
           } > body.md
           if gh pr view "$b" > /dev/null 2>&1; then
             gh pr edit "$b" --body-file body.md

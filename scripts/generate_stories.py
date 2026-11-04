@@ -5,6 +5,8 @@
 
 The cast grows with the story: an episode may introduce up to MAX_NEW_CHARACTERS new
 characters (recurring or guest), which are appended to characters.csv with it.
+Every episode is written against the story bible (locations, relationships, timeline,
+open threads) and adds its own events and threads to series/continuity.csv.
 """
 import argparse
 import json
@@ -12,34 +14,54 @@ import os
 import re
 import sys
 
-from common import (CALLBACK_FIELDS, CHARACTER_FIELDS, MAX_NEW_CHARACTERS, REGISTERS, SCENE_FIELDS,
-                    SCENES_PER_EPISODE, STORY_FIELDS, VOICES, append_csv, character_id, read_csv,
-                    season_for, story_id)
+from common import (CALLBACK_FIELDS, CHARACTER_FIELDS, CONTINUITY_FIELDS, MAX_CHARACTERS_PER_SCENE,
+                    MAX_NEW_CHARACTERS, REGISTERS, SCENE_FIELDS, SCENES_PER_EPISODE, STORY_FIELDS, TIMES_OF_DAY,
+                    VOICES, append_csv, character_id, read_csv, season_for, story_id)
 from validate_stories import check_character, check_episode
 
 MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
 MAX_ATTEMPTS = 3
-NEW_CHARACTER_KEYS = ["character_id", "name", "species", "role", "description", "traits", "backstory",
-                      "wound", "fear", "arc", "voice_id", "never_change", "negative"]
+NEW_CHARACTER_KEYS = ["character_id", "name", "species", "role", "age", "description", "clothing", "traits",
+                      "strengths", "weaknesses", "motivation", "backstory", "wound", "fear", "arc", "relationships",
+                      "voice_id", "never_change", "negative"]
+SCENE_KEYS = ["scene_id", "duration_s", "location", "time_of_day", "characters", "action", "emotion", "camera",
+              "speaker", "dialogue", "sfx", "transition"]
 
 SYSTEM_PROMPT = f"""You are the head writer for "The Box Debates," a serialized photorealistic short-form drama about two broken cats and a lonely human learning to be a family.
+You think like a screenwriter, a drama director and an audience-retention strategist: every episode is a small,
+complete story people want to watch to the end, and every scene moves it forward.
 
-RULES:
+FORMAT:
 - Each episode = 60 seconds = exactly {SCENES_PER_EPISODE} scenes of 5 seconds (duration_s is always 5).
-- Max 12 words of dialogue per scene. Dialogue may be empty. If a scene has dialogue, speaker is the character_id who says it.
+- Per scene: location (one of the story bible's locations, exact name), time_of_day (one of {", ".join(sorted(TIMES_OF_DAY))}),
+  characters present, action (what happens, concrete physical actions), emotion (what the characters feel, shown through
+  face, body language and action), camera (angle and simple movement), speaker + dialogue, sfx (background sounds), transition.
 - emotional_register must be exactly one of: {", ".join(sorted(REGISTERS))}.
-- life_lesson is shown through events, never stated aloud in dialogue.
-- future_tease: a one-line hint of a later episode or season, or "None". Plant one every 3-5 episodes.
-- Honour the continuity notes, due payoffs, and season position you are given.
 - transition is one of: cut, fade, dissolve, match_cut.
 - Use bare ids only: characters "C001;C002", speaker "C001", scene_id 1..{SCENES_PER_EPISODE}, duration_s 5.
+
+STORYTELLING:
+- Open on a hook in scene 1; build to one emotional or dramatic turn; land the ending.
+- life_lesson is shown through events, never stated aloud.
+- Dialogue: max 12 words per scene, natural, in the speaker's voice, no explaining; silence and reactions are welcome.
+- Use suspense, reveals and real cliffhangers only where they are earned, not every episode.
+- future_tease: a one-line hint of a later episode or season, or "None". Plant one every 3-5 episodes.
+
+PRODUCIBLE ON SCREEN:
+- At most {MAX_CHARACTERS_PER_SCENE} characters per scene. One clear physical action per scene. No impossible camera moves.
+- Characters look and dress exactly as in their bible entry unless the story deliberately changes it.
+
+CONTINUITY:
+- Check the story bible before writing: timeline, relationships, clothing, open threads, due payoffs.
+- Report continuity: "events" (1-3 facts this episode establishes), "opened" (new unresolved threads, if any),
+  "resolved" (ids of open threads this episode resolves, if any).
 
 CAST:
 - Use the cast you are given. Mango, Shadow and The Human anchor every season.
 - Introduce a new character when the story needs someone the cast lacks (a vet, the former owner, a kitten,
   a neighbour's dog...). At most {MAX_NEW_CHARACTERS} per episode, using exactly the new ids you are given, in order.
 - role "recurring" if they will matter again this season or later; "guest" if they appear in this episode only.
-- description: concrete photographic appearance (species, breed, build, colours, markings, clothing, age).
+- description: concrete photographic appearance (species, breed, build, colours, markings, age). clothing: what they wear.
   Adults look clearly adult. The Human's face is never shown.
 - never_change: 2-4 visual traits that must stay identical in every scene, separated by ';'.
 - negative: visual traits the artist must avoid for this character (comma-separated), or "".
@@ -47,8 +69,9 @@ CAST:
 
 Return ONLY valid JSON with exactly these keys:
 {{"stories": [{{"title","emotional_register","life_lesson","future_tease","hook","synopsis","characters_used","music_prompt"}}],
-  "scenes": [{{"scene_id","duration_s","characters","action","camera","speaker","dialogue","sfx","transition"}} x {SCENES_PER_EPISODE}],
+  "scenes": [{{{",".join(f'"{k}"' for k in SCENE_KEYS)}}} x {SCENES_PER_EPISODE}],
   "callbacks": [{{"setup_moment","payoff_episode","payoff_moment"}}],
+  "continuity": {{"events": [], "opened": [], "resolved": []}},
   "new_characters": [{{{",".join(f'"{k}"' for k in NEW_CHARACTER_KEYS)}}}]}}
 "stories" has exactly one entry. "callbacks" lists setups planted in THIS episode (payoff_episode is an integer episode number greater than this one); use [] if none. "new_characters" is [] if nobody new appears."""
 
@@ -58,8 +81,43 @@ def available_cast(cast: list[dict], sid: str) -> list[dict]:
     return [c for c in cast if c["first_episode"] <= sid and (c["role"] != "guest" or c["first_episode"] == sid)]
 
 
+def open_threads(continuity: list[dict]) -> dict[str, dict]:
+    """thread_id -> the 'open' row, for threads not resolved yet."""
+    opened = {r["thread_id"]: r for r in continuity if r["kind"] == "open"}
+    for r in continuity:
+        if r["kind"] == "resolved":
+            opened.pop(r["thread_id"], None)
+    return opened
+
+
+def bible_text(sid: str, cast: list[dict], locations: list[dict], continuity: list[dict], concept: dict | None = None) -> str:
+    """The story bible as the writer sees it before episode `sid`."""
+    lines = []
+    if concept:
+        lines.append(f"DRAMA: {concept.get('title', '')} - {concept.get('concept', '')} Genre: {concept.get('genre', '')}. "
+                     f"Message: {concept.get('message', '')}. Central conflict: {concept.get('central_conflict', '')}. "
+                     f"Ending: {concept.get('ending', '')}.")
+    if locations:
+        lines.append("LOCATIONS (use these exact names):")
+        lines += [f"- {loc['name']}: {loc['description']} Lighting: {loc['lighting']}." for loc in locations
+                  if loc["first_episode"] <= sid]
+    rel = [c for c in available_cast(cast, sid) if c.get("relationships")]
+    if rel:
+        lines.append("RELATIONSHIPS:")
+        lines += [f"- {c['name']}: {c['relationships']}" for c in rel]
+    events = [r for r in continuity if r["kind"] == "event" and r["story_id"] < sid][-12:]
+    if events:
+        lines.append("TIMELINE (most recent events):")
+        lines += [f"- {r['story_id']}: {r['note']}" for r in events]
+    threads = open_threads([r for r in continuity if r["story_id"] < sid])
+    if threads:
+        lines.append("OPEN THREADS (put an id in 'resolved' when this episode resolves it):")
+        lines += [f"- {tid} (since {r['story_id']}): {r['note']}" for tid, r in threads.items()]
+    return "\n".join(lines)
+
+
 def build_user_prompt(episode: int, stories: list[dict], callbacks: list[dict], seasons: list[dict],
-                      cast: list[dict], outline: str = "", allow_new: bool = True) -> str:
+                      cast: list[dict], outline: str = "", allow_new: bool = True, bible: str = "") -> str:
     sid = story_id(episode)
     season, n, finale = season_for(episode, seasons)
     lines = [
@@ -71,9 +129,12 @@ def build_user_prompt(episode: int, stories: list[dict], callbacks: list[dict], 
         lines.append(f"This is the SEASON FINALE. It must end on this cliffhanger: {season['finale_hook']}")
     if outline:
         lines.append(f"SHOWRUNNER OUTLINE (follow it):\n{outline}")
+    if bible:
+        lines.append(f"STORY BIBLE:\n{bible}")
     lines.append("Cast available in this episode:")
-    lines += [f"- {c['character_id']} {c['name']} ({c['species']}, {c['role']}, voice {c['voice_id']}): "
-              f"{c['description']}. {c['backstory']}. Wound: {c['wound']}." for c in available_cast(cast, sid)]
+    lines += [f"- {c['character_id']} {c['name']} ({c['species']}, {c['role']}, age {c.get('age', '?')}, voice {c['voice_id']}): "
+              f"{c['description']}. Wears: {c.get('clothing', '')}. Motivation: {c.get('motivation', '')}. "
+              f"Wound: {c['wound']}." for c in available_cast(cast, sid)]
     if allow_new:
         first_free = max(int(c["character_id"][1:]) for c in cast) + 1
         new_ids = [character_id(first_free + i) for i in range(MAX_NEW_CHARACTERS)]
@@ -108,11 +169,17 @@ def _text(value) -> str:
     return ";".join(map(str, value)) if isinstance(value, list) else str(value or "").strip()
 
 
-def ingest(data: dict, episode: int, cast: list[dict],
-           allow_new: bool = True) -> tuple[dict, list[dict], list[dict], list[dict], list[str]]:
-    """Turn model JSON into CSV-ready rows. Returns (story, scenes, callbacks, new_characters, errors)."""
+def _slug(value) -> str:
+    return re.sub(r"[\s\-]+", "_", str(value).strip().lower())
+
+
+def ingest(data: dict, episode: int, cast: list[dict], allow_new: bool = True, locations: list[dict] | None = None,
+           continuity: list[dict] | None = None):
+    """Turn model JSON into CSV-ready rows. Returns (story, scenes, callbacks, new_characters, continuity, errors)."""
     sid = story_id(episode)
     first_free = max(int(c["character_id"][1:]) for c in cast) + 1
+    continuity = continuity or []
+    known_locations = {loc["name"].lower(): loc["name"] for loc in locations or [] if loc["first_episode"] <= sid}
     try:
         raw = data["stories"][0]
         story = {
@@ -124,7 +191,9 @@ def ingest(data: dict, episode: int, cast: list[dict],
         for r in data["scenes"]:
             row = {k: str(r.get(k, "")).strip() for k in SCENE_FIELDS[1:]}
             row.update(scene_id=_num(r.get("scene_id")), duration_s=_num(r.get("duration_s")),
-                       characters=_ids(r.get("characters")), speaker=_ids(r.get("speaker")))
+                       characters=_ids(r.get("characters")), speaker=_ids(r.get("speaker")),
+                       time_of_day=_slug(r.get("time_of_day", "")))
+            row["location"] = known_locations.get(row["location"].lower(), row["location"])
             scenes.append({"story_id": sid, **row})
         cbs = [{
             "setup_episode": sid, "setup_moment": str(c["setup_moment"]).strip(),
@@ -138,8 +207,16 @@ def ingest(data: dict, episode: int, cast: list[dict],
             row["reference_sheet"] = f"series/refs/{row['character_id']}.png"
             row["_expected_id"] = character_id(first_free + i)
             new_chars.append(row)
-    except (KeyError, IndexError, TypeError, ValueError) as e:
-        return {}, [], [], [], [f"{sid}: malformed response ({type(e).__name__}: {e})"]
+        cont = data.get("continuity") or {}
+        next_thread = 1 + max((int(r["thread_id"][1:]) for r in continuity if r["thread_id"]), default=0)
+        cont_rows = [{"story_id": sid, "kind": "event", "thread_id": "", "note": str(n).strip()}
+                     for n in cont.get("events") or []]
+        cont_rows += [{"story_id": sid, "kind": "open", "thread_id": f"T{next_thread + i:03d}", "note": str(n).strip()}
+                      for i, n in enumerate(cont.get("opened") or [])]
+        resolved = [re.findall(r"T\d{3}", str(t)) for t in cont.get("resolved") or []]
+        cont_rows += [{"story_id": sid, "kind": "resolved", "thread_id": t[0], "note": ""} for t in resolved if t]
+    except (KeyError, IndexError, TypeError, ValueError, AttributeError) as e:
+        return {}, [], [], [], [], [f"{sid}: malformed response ({type(e).__name__}: {e})"]
 
     errors = []
     if new_chars and not allow_new:
@@ -158,16 +235,25 @@ def ingest(data: dict, episode: int, cast: list[dict],
 
     allowed = {c["character_id"] for c in available_cast(cast, sid)} | {c["character_id"] for c in new_chars}
     errors += check_episode(story, scenes, allowed)
+    if known_locations:
+        errors += [f"{sid} scene {s['scene_id']}: location '{s['location']}' is not in the story bible "
+                   f"({', '.join(known_locations.values())})" for s in scenes if s["location"] not in known_locations.values()]
     errors += [f"{sid}: callback payoff {c['payoff_episode']} must come after this episode"
                for c in cbs if c["payoff_episode"] <= sid]
-    return story, scenes, cbs, new_chars, errors
+    if not any(r["kind"] == "event" for r in cont_rows):
+        errors.append(f"{sid}: continuity.events needs at least one fact this episode establishes")
+    still_open = open_threads(continuity)
+    errors += [f"{sid}: resolved thread {r['thread_id']} is not open" for r in cont_rows
+               if r["kind"] == "resolved" and r["thread_id"] not in still_open]
+    return story, scenes, cbs, new_chars, cont_rows, errors
 
 
-def save(story: dict, scenes: list[dict], cbs: list[dict], new_chars: list[dict]) -> None:
+def save(story: dict, scenes: list[dict], cbs: list[dict], new_chars: list[dict], cont_rows: list[dict] = ()) -> None:
     append_csv("characters.csv", CHARACTER_FIELDS, new_chars)
     append_csv("stories.csv", STORY_FIELDS, [story])
     append_csv("scenes.csv", SCENE_FIELDS, scenes)
     append_csv("callbacks.csv", CALLBACK_FIELDS, cbs)
+    append_csv("continuity.csv", CONTINUITY_FIELDS, list(cont_rows))
 
 
 def call_api(client, user_prompt: str, feedback: str = "", system: str = SYSTEM_PROMPT) -> dict:
@@ -193,32 +279,38 @@ def main() -> int:
 
     for _ in range(1 if args.from_json else args.count):
         stories, callbacks, cast = read_csv("stories.csv"), read_csv("callbacks.csv"), read_csv("characters.csv")
+        locations, continuity = read_csv("locations.csv"), read_csv("continuity.csv")
         episode = max((int(s["episode"]) for s in stories), default=0) + 1
         if episode > total:
             print(f"Series plan complete ({total} episodes); nothing more to write.")
             break
+        sid = story_id(episode)
+
+        def attempt(data):
+            return ingest(data, episode, cast, locations=locations, continuity=continuity)
 
         if args.from_json:
             with open(args.from_json, encoding="utf-8") as f:
-                data = json.load(f)
-            story, scenes, cbs, new_chars, errors = ingest(data, episode, cast)
+                story, scenes, cbs, new_chars, cont_rows, errors = attempt(json.load(f))
         else:
             if client is None:
                 from openai import OpenAI
                 client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
-            prompt, feedback = build_user_prompt(episode, stories, callbacks, seasons, cast), ""
-            for attempt in range(1, MAX_ATTEMPTS + 1):
-                story, scenes, cbs, new_chars, errors = ingest(call_api(client, prompt, feedback), episode, cast)
+            prompt = build_user_prompt(episode, stories, callbacks, seasons, cast,
+                                       bible=bible_text(sid, cast, locations, continuity))
+            feedback = ""
+            for n in range(1, MAX_ATTEMPTS + 1):
+                story, scenes, cbs, new_chars, cont_rows, errors = attempt(call_api(client, prompt, feedback))
                 if not errors:
                     break
-                print(f"Episode {episode} attempt {attempt} rejected: {len(errors)} error(s)", file=sys.stderr)
+                print(f"Episode {episode} attempt {n} rejected: {len(errors)} error(s)", file=sys.stderr)
                 feedback = "\n".join(errors[:15])
 
         if errors:
             print("\n".join(errors), file=sys.stderr)
             print(f"Giving up on episode {episode}; nothing written for it.", file=sys.stderr)
             return 1 if made == 0 else 0
-        save(story, scenes, cbs, new_chars)
+        save(story, scenes, cbs, new_chars, cont_rows)
         made += 1
         added = ", ".join(f"{c['character_id']} {c['name']} ({c['role']})" for c in new_chars)
         print(f"Wrote {story['story_id']} \"{story['title']}\" ({story['emotional_register']}) as pending"

@@ -2,15 +2,16 @@
 import sys
 from collections import Counter
 
-from common import (MAX_DIALOGUE_WORDS, MOVEMENTS, REGISTERS, ROLES, SCENE_SECONDS, SCENES_PER_EPISODE,
-                    SHOT_SIZES, STATUSES, TRANSITIONS, VOICES, read_csv, story_id)
+from common import (CONTINUITY_KINDS, MAX_CHARACTERS_PER_SCENE, MAX_DIALOGUE_WORDS, MOVEMENTS, REGISTERS, ROLES,
+                    SCENE_SECONDS, SCENES_PER_EPISODE, SHOT_SIZES, STATUSES, TIMES_OF_DAY, TRANSITIONS, VOICES,
+                    read_csv, story_id)
 
 
 def check_character(c: dict) -> list[str]:
-    """Errors for one characters.csv row."""
+    """Errors for one characters.csv row (the character bible)."""
     cid = c["character_id"]
     errors = []
-    for col in ("name", "species", "description", "never_change"):
+    for col in ("name", "species", "age", "description", "clothing", "motivation", "never_change"):
         if not str(c[col]).strip():
             errors.append(f"{cid}: empty {col}")
     if c["role"] not in ROLES:
@@ -22,6 +23,11 @@ def check_character(c: dict) -> list[str]:
     if c["reference_sheet"] != f"series/refs/{cid}.png":
         errors.append(f"{cid}: reference_sheet must be series/refs/{cid}.png")
     return errors
+
+
+def is_legacy(scenes: list[dict]) -> bool:
+    """Written before scenes had location / time_of_day / emotion."""
+    return bool(scenes) and not any(sc["location"] or sc["time_of_day"] or sc["emotion"] for sc in scenes)
 
 
 def check_episode(s: dict, scenes: list[dict], chars: set[str]) -> list[str]:
@@ -45,8 +51,19 @@ def check_episode(s: dict, scenes: list[dict], chars: set[str]) -> list[str]:
     if nums != list(range(1, SCENES_PER_EPISODE + 1)):
         errors.append(f"{sid}: scenes must be 1..{SCENES_PER_EPISODE}, got {nums}")
 
+    legacy = is_legacy(scenes)
     for sc in scenes:
         tag = f"{sid} scene {sc['scene_id']}"
+        if not legacy:
+            if not sc["location"].strip():
+                errors.append(f"{tag}: empty location")
+            if sc["time_of_day"] not in TIMES_OF_DAY:
+                errors.append(f"{tag}: bad time_of_day '{sc['time_of_day']}'")
+            if not sc["emotion"].strip():
+                errors.append(f"{tag}: empty emotion")
+        present = [c for c in sc["characters"].split(";") if c]
+        if len(present) > MAX_CHARACTERS_PER_SCENE:
+            errors.append(f"{tag}: {len(present)} characters in one shot (max {MAX_CHARACTERS_PER_SCENE})")
         if str(sc["duration_s"]) != str(SCENE_SECONDS):
             errors.append(f"{tag}: duration_s must be {SCENE_SECONDS}")
         words = len(sc["dialogue"].split())
@@ -89,6 +106,8 @@ def validate() -> tuple[list[str], list[str]]:
             errors.append(f"{sid}: scenes exist but story is missing")
     for s in stories:
         errors += check_episode(s, by_story.get(s["story_id"], []), chars)
+        if is_legacy(by_story.get(s["story_id"], [])):
+            warnings.append(f"{s['story_id']}: written before scene location/time/emotion existed; rewrite or fill them in")
         early = [c for c in s["characters_used"].split(";") if debut.get(c, "") > s["story_id"]]
         if early:
             errors.append(f"{s['story_id']}: uses {';'.join(early)} before their first_episode")
@@ -120,6 +139,24 @@ def validate() -> tuple[list[str], list[str]]:
             if story_id(n) in seen:
                 errors.append(f"{tag}: {story_id(n)} is already in {seen[story_id(n)]}")
             seen[story_id(n)] = tag
+
+    loc_names = [loc["name"] for loc in read_csv("locations.csv")]
+    for name, n in Counter(n.lower() for n in loc_names).items():
+        if n > 1:
+            errors.append(f"location '{name}': listed {n} times")
+    opened: set[str] = set()
+    for r in read_csv("continuity.csv"):
+        tag = f"continuity {r['story_id']} {r['kind']} {r['thread_id']}".rstrip()
+        if r["story_id"] not in ids:
+            errors.append(f"{tag}: no such story")
+        if r["kind"] not in CONTINUITY_KINDS:
+            errors.append(f"{tag}: bad kind")
+        elif r["kind"] == "open":
+            if r["thread_id"] in opened:
+                errors.append(f"{tag}: thread id used twice")
+            opened.add(r["thread_id"])
+        elif r["kind"] == "resolved" and r["thread_id"] not in opened:
+            errors.append(f"{tag}: resolves a thread that was never opened before it")
 
     for cb in callbacks:
         s_ep, p_ep = cb["setup_episode"], cb["payoff_episode"]
