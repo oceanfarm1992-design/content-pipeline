@@ -36,7 +36,7 @@ jobs:
         run: |
           set -o pipefail
           size="${{ inputs.size }}"
-          modal run scripts/modal_video.py --gpu ${{ matrix.gpu }} --steps ${{ inputs.steps }} \
+          modal run scripts/modal_video.py::main --gpu ${{ matrix.gpu }} --steps ${{ inputs.steps }} \
             --width "${size%x*}" --height "${size#*x}" --frames ${{ inputs.frames }} --out out/modal | tee run.log
           { echo "## Modal ${{ matrix.gpu }}"; echo '```json'; cat out/modal/*.json; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4

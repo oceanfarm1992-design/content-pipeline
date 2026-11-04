@@ -350,11 +350,18 @@ def check_shots(data: dict, sid: str, scene_ids: list[str]) -> tuple[list[dict],
     if sorted(r["scene_id"] for r in rows) != sorted(scene_ids):
         errors.append(f"{sid}: need exactly one shot per scene ({len(scene_ids)}), got {len(rows)}")
     for r in rows:
-        tag = f"{sid} shot {r['scene_id']}"
+        # The model often files an angle or a move under shot_size ("low_angle", "tracking"): move it where it
+        # belongs and fall back to a neutral value instead of failing the whole episode.
         if r["shot_size"] not in SHOT_SIZES:
-            errors.append(f"{tag}: bad shot_size '{r['shot_size']}'")
+            misplaced = r["shot_size"]
+            if misplaced in MOVEMENTS and r["movement"] not in MOVEMENTS:
+                r["movement"] = misplaced
+            elif "angle" in misplaced or "view" in misplaced:
+                r["angle"] = f"{r['angle']}, {misplaced.replace('_', ' ')}".strip(", ")
+            r["shot_size"] = "medium"
         if r["movement"] not in MOVEMENTS:
-            errors.append(f"{tag}: bad movement '{r['movement']}'")
+            r["movement"] = "static"
+        tag = f"{sid} shot {r['scene_id']}"
         for col in ("angle", "lighting", "image_prompt", "motion_prompt"):
             if not r[col]:
                 errors.append(f"{tag}: empty {col}")
