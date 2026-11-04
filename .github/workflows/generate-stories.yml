@@ -19,7 +19,7 @@ jobs:
 
       # Parse the CSV properly (quoted commas break awk). Unreviewed 'pending'
       # drafts count toward the queue so we don't pile up unlimited drafts
-      # while waiting for approval.
+      # while waiting for approval. At one episode per day, 7 queued is a week of buffer.
       - name: Check queue depth
         id: queue
         run: |
@@ -28,14 +28,14 @@ jobs:
           rows = list(csv.DictReader(open("series/stories.csv", encoding="utf-8")))
           queued = sum(r["status"] in ("pending", "approved") for r in rows)
           print(f"queued={queued}")
-          print(f"need_more={'true' if queued < 20 else 'false'}")
+          print(f"need_more={'true' if queued < 7 else 'false'}")
           EOF
 
       - name: Generate stories via API
         if: steps.queue.outputs.need_more == 'true'
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-        run: python scripts/generate_stories.py --count 10
+        run: python scripts/generate_stories.py --count 3
 
       - name: Validate
         run: python scripts/validate_stories.py
