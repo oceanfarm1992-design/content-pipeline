@@ -22,7 +22,7 @@ MAX_ATTEMPTS = 3
 NEW_CHARACTER_KEYS = ["character_id", "name", "species", "role", "description", "traits", "backstory",
                       "wound", "fear", "arc", "voice_id", "never_change", "negative"]
 
-SYSTEM_PROMPT = f"""You are the head writer for "The Box Debates," a serialized animated drama about two broken cats and a lonely human learning to be a family.
+SYSTEM_PROMPT = f"""You are the head writer for "The Box Debates," a serialized photorealistic short-form drama about two broken cats and a lonely human learning to be a family.
 
 RULES:
 - Each episode = 60 seconds = exactly {SCENES_PER_EPISODE} scenes of 5 seconds (duration_s is always 5).
@@ -39,7 +39,7 @@ CAST:
 - Introduce a new character when the story needs someone the cast lacks (a vet, the former owner, a kitten,
   a neighbour's dog...). At most {MAX_NEW_CHARACTERS} per episode, using exactly the new ids you are given, in order.
 - role "recurring" if they will matter again this season or later; "guest" if they appear in this episode only.
-- description: concrete visual design for an anime artist (species, build, colours, markings, clothing).
+- description: concrete photographic appearance (species, breed, build, colours, markings, clothing, age).
   Adults look clearly adult. The Human's face is never shown.
 - never_change: 2-4 visual traits that must stay identical in every scene, separated by ';'.
 - negative: visual traits the artist must avoid for this character (comma-separated), or "".

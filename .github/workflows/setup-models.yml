@@ -1,6 +1,6 @@
 name: Setup Models
 # Downloads and caches each stage's models, then proves they run on a CPU runner:
-#   image -> character reference sheets with Anima-Turbo (series/refs/*.png)
+#   image -> photoreal character reference sheets with RealVisXL V5.0 Lightning (series/refs/*.png)
 #   voice -> one line per character with Kokoro
 #   music -> a 60 s bed for S0001 with Stable Audio Open Small (needs the HF_TOKEN secret)
 on:
@@ -22,15 +22,15 @@ jobs:
       - uses: ./.github/actions/sd-cli
       - uses: actions/cache@v4
         with:
-          path: models/anima
+          path: models/realvis
           key: models-image-${{ hashFiles('scripts/models.txt') }}
-      - run: bash scripts/download_models.sh image
+      - run: SD_CLI=bin/sd-cli bash scripts/download_models.sh image
       - name: Render character reference sheets
         timeout-minutes: 280
         run: |
           set -o pipefail
-          python scripts/render_refs.py --sd-cli bin/sd-cli --size 768x768 --steps 8 | tee render.log
-          { echo "## Image: Anima-Turbo reference sheets"; sed -n '/^| id/,$p' render.log; } >> "$GITHUB_STEP_SUMMARY"
+          python scripts/render_refs.py --sd-cli bin/sd-cli | tee render.log
+          { echo "## Image: RealVisXL V5.0 Lightning reference sheets"; sed -n '/^| id/,$p' render.log; } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         if: always()
         with:

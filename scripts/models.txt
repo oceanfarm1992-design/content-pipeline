@@ -1,8 +1,9 @@
-# stage   file (under models/)          url
-# Image: Anima-Turbo v1.1 (Cosmos-Predict2 2B finetune). Weights are CircleStone Labs Non-Commercial License v1.2.
-image     anima/dit-turbo-q4_k_m.gguf    https://huggingface.co/vanes430/Anima-Turbo-V1.1-GGUF/resolve/main/anima-turbo-v1.1-Q4_K_M.gguf
-image     anima/qwen_3_06b_base.safetensors https://huggingface.co/circlestone-labs/Anima/resolve/main/split_files/text_encoders/qwen_3_06b_base.safetensors
-image     anima/qwen_image_vae.safetensors  https://huggingface.co/circlestone-labs/Anima/resolve/main/split_files/vae/qwen_image_vae.safetensors
+# stage   file (under models/)          url   [convert: sd-cli quant type]
+# A 4th column means: download the url to a temp file, convert it with sd-cli to that type, keep only the result
+# (keeps the Actions cache under its 10 GB limit).
+# Image: RealVisXL V5.0 Lightning (SDXL, photoreal, OpenRAIL++). 6.9 GB fp16 -> ~3.8 GB q8_0.
+image     realvis/realvisxl-v5-lightning-q8_0.gguf  https://huggingface.co/SG161222/RealVisXL_V5.0_Lightning/resolve/main/RealVisXL_V5.0_Lightning_fp16.safetensors  q8_0
+image     realvis/sdxl_vae_fp16_fix.safetensors     https://huggingface.co/madebyollin/sdxl-vae-fp16-fix/resolve/main/sdxl_vae.safetensors
 # Video: Wan 2.1 T2V 1.3B
 video     wan/dit-q4_0.gguf              https://huggingface.co/calcuis/wan-1.3b-gguf/resolve/main/wan2.1_t2v_1.3b-q4_0.gguf
 video     wan/umt5-xxl-q4_k_s.gguf       https://huggingface.co/city96/umt5-xxl-encoder-gguf/resolve/main/umt5-xxl-encoder-Q4_K_S.gguf

@@ -27,7 +27,7 @@ from validate_stories import check_character
 PLANS = SERIES / "season_plans"
 MAX_NEW_CAST = 6
 
-SHOWRUNNER_PROMPT = f"""You are the showrunner of "The Box Debates," a serialized animated drama about two broken cats
+SHOWRUNNER_PROMPT = f"""You are the showrunner of "The Box Debates," a serialized photorealistic short-form drama about two broken cats
 (Mango, Shadow) and a lonely human learning to be a family. Each episode is 60 seconds, so every episode needs one
 clear, visual beat. You plan a whole season before the writers start.
 
@@ -46,10 +46,10 @@ Return ONLY JSON:
   "new_cast": [{{"name", "role", "first_episode", "purpose"}}]}}
 Episode numbers are integers. "characters" lists the names appearing in that episode."""
 
-CASTING_PROMPT = f"""You are the casting director for "The Box Debates," an anime-style animated series. For each new
-character the showrunner needs, write the full casting and design sheet an animator and a voice director can use.
+CASTING_PROMPT = f"""You are the casting director for "The Box Debates," a photorealistic short-form series. For each new
+character the showrunner needs, write the full casting and appearance sheet a cinematographer and a voice director can use.
 
-- description: concrete visual design (species, build, colours, markings, clothing, age). Adults look clearly adult.
+- description: concrete photographic appearance (species, breed, build, colours, markings, clothing, age). Adults look clearly adult.
 - never_change: 2-4 visual traits that stay identical in every scene, separated by ';'.
 - negative: visual traits the artist must avoid (comma-separated), or "".
 - traits: personality, separated by ';'. backstory, wound, fear, arc: one short sentence each.
@@ -59,14 +59,14 @@ character the showrunner needs, write the full casting and design sheet an anima
 
 Return ONLY JSON: {{"new_characters": [{{{", ".join(f'"{k}"' for k in NEW_CHARACTER_KEYS + ["first_episode"])}}}]}}"""
 
-DIRECTOR_PROMPT = f"""You are the film director of "The Box Debates," an anime-style animated series rendered one
+DIRECTOR_PROMPT = f"""You are the film director of "The Box Debates," a photorealistic series filmed (rendered) one
 5-second shot per scene. Turn the episode's script into a shot list, one shot per scene.
 
 - shot_size: one of {", ".join(sorted(SHOT_SIZES))}.
-- angle: e.g. eye level, low angle, high angle, cat's-eye view, over the shoulder.
+- angle: e.g. eye level, low angle, high angle, cat's-eye view, over the shoulder; include the lens (24mm wide, 50mm, 85mm portrait).
 - movement: one of {", ".join(sorted(MOVEMENTS))}. Use stillness for emotion and movement for comedy or tension.
 - lighting: time of day, light source and mood in a few words; keep one location's lighting consistent.
-- image_prompt: a self-contained text-to-image prompt for the shot's key frame: composition, each visible character's
+- image_prompt: a self-contained photorealistic text-to-image prompt for the shot's key frame (cinematic still, lens, depth of field): composition, each visible character's
   look (from their design), their pose and expression, the setting and the lighting. No dialogue, no text in frame.
   The Human's face is never shown.
 - motion_prompt: what moves during the 5 seconds, under 25 words.
