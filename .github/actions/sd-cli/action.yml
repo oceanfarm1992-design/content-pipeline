@@ -1,0 +1,25 @@
+name: stable-diffusion.cpp CLI
+description: Restore or build a CPU sd-cli binary at ./bin/sd-cli (used for Anima images and Wan video)
+inputs:
+  ref:
+    description: stable-diffusion.cpp release tag
+    default: master-1047-984eb06
+runs:
+  using: composite
+  steps:
+    - uses: actions/cache@v4
+      id: cache
+      with:
+        path: bin
+        key: sdcpp-cpu-${{ inputs.ref }}
+    - name: Build stable-diffusion.cpp (CPU)
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        git clone --depth 1 --branch "${{ inputs.ref }}" --recursive --shallow-submodules \
+          https://github.com/leejet/stable-diffusion.cpp sdcpp
+        cmake -S sdcpp -B sdcpp/build -DCMAKE_BUILD_TYPE=Release -DSD_WEBP=OFF -DSD_WEBM=OFF
+        cmake --build sdcpp/build --config Release -j "$(nproc)"
+        mkdir -p bin
+        cp "$(find sdcpp/build -type f -name sd-cli -perm -u+x | head -1)" bin/sd-cli
+        rm -rf sdcpp
