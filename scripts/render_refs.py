@@ -16,13 +16,13 @@ from common import read_csv
 
 ROOT = Path(__file__).resolve().parent.parent
 MODELS = ROOT / "models" / "realvis"
-STYLE = ("photorealistic, professional studio photograph, 50mm lens, soft natural light, sharp focus, "
-         "single subject, full body, plain light grey seamless background")
+STYLE = ("photorealistic, professional studio photograph, 35mm lens, soft natural light, sharp focus, "
+         "single subject, (full body shot, entire body in frame:1.3), plain light grey seamless background")
 # The model card's recommended negative, plus our own.
 NEGATIVE = ("(octane render, render, drawing, anime, cartoon, bad photo, bad photography:1.3), "
             "(worst quality, low quality, blurry:1.2), (bad anatomy, bad proportions:1.1), "
             "(deformed eyes, deformed iris, deformed pupils), deformed hands, fused fingers, "
-            "multiple views, text, watermark, signature, nsfw")
+            "(close-up, portrait crop, cropped body:1.2), multiple views, text, watermark, signature, nsfw")
 
 
 def prompt_for(c: dict) -> str:
